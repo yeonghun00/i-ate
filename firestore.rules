@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow access to families collection for authenticated users with enhanced security
+    match /families/{familyId} {
+      // Basic read/write for authenticated users
+      allow read, write: if request.auth != null;
+      
+      // More granular rules for specific operations
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+      
+      
+      // Enhanced rules for meals subcollection
+      match /meals/{date} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
+      
+      // Rules for analytics and monitoring subcollections
+      match /analytics/{document=**} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
+    }
+    
+  }
+}

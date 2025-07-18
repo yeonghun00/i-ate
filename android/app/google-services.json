@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "35493200393",
+    "project_id": "thanks-everyday",
+    "storage_bucket": "thanks-everyday.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:35493200393:android:8508eafd343b73a88f2ed8",
+        "android_client_info": {
+          "package_name": "com.thousandemfla.thanks_everyday.elder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALzSCpgK2e0u2nBUXbLMPcw0BG6UwRhY0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
