@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
 
 class SpecialPermissionGuideScreen extends StatefulWidget {
@@ -227,7 +228,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0xFFF8F9FA), Color(0xFFE9ECEF)],
+              colors: [AppTheme.backgroundLight, AppTheme.backgroundSecondary],
             ),
           ),
           child: SingleChildScrollView(
@@ -255,7 +256,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                     style: TextStyle(
                       fontSize: 28.0,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF2E3440),
+                      color: AppTheme.textSecondary,
                     ),
                   ),
                 ),
@@ -664,7 +665,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                  color: AppTheme.primaryGreen.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: const Color(0xFF10B981)),
                 ),
@@ -711,7 +712,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                  color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),
@@ -748,7 +749,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                  color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                   blurRadius: 10,
                   offset: const Offset(0, 5),
                 ),

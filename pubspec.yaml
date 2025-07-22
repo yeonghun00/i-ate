@@ -25,6 +25,7 @@ dependencies:
   cloud_firestore: ^5.0.0
   firebase_storage: ^12.0.0
   firebase_auth: ^5.0.0
+  firebase_messaging: ^15.0.0
   
   # Audio recording
   flutter_sound: ^9.2.13
@@ -41,6 +42,13 @@ dependencies:
   
   # Shared preferences
   shared_preferences: ^2.0.0
+  
+  # HTTP requests
+  http: ^1.1.0
+  
+  # For FCM v1 API with Service Account
+  googleapis_auth: ^1.4.1
+  
 
 dev_dependencies:
   flutter_test:
@@ -52,6 +60,24 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  
+  # Flutter launcher icons - generates app icons
+  flutter_launcher_icons: ^0.13.1
+
+# Flutter launcher icons configuration
+flutter_launcher_icons:
+  android: true
+  ios: false  # Set to true if you want iOS icons too
+  image_path: "assets/images/app_icon/app_logo.png"
+  min_sdk_android: 21 # android min sdk min:16, default 21
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: false
+  linux:
+    generate: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -65,9 +91,10 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/fonts/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

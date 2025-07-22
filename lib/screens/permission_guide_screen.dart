@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:thanks_everyday/theme/app_theme.dart';
 
 class PermissionGuideScreen extends StatefulWidget {
   final VoidCallback onPermissionsGranted;
@@ -80,8 +81,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Color(0xFFF8F9FA),
-                Color(0xFFE9ECEF),
+                AppTheme.backgroundLight,
+                AppTheme.backgroundSecondary,
               ],
             ),
           ),
@@ -101,13 +102,13 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Color(0xFF10B981),
-                        Color(0xFF059669),
+                        AppTheme.primaryGreen,
+                        AppTheme.darkGreen,
                       ],
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                        color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                         blurRadius: 20,
                         offset: const Offset(0, 10),
                       ),
@@ -128,7 +129,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                   style: TextStyle(
                     fontSize: 28.0,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E3440),
+                    color: AppTheme.textSecondary,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -139,7 +140,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                   '식사 기록 앱이 제대로 작동하려면\n아래 권한이 필요합니다',
                   style: TextStyle(
                     fontSize: 18.0,
-                    color: Color(0xFF6B7280),
+                    color: AppTheme.textLight,
                     height: 1.5,
                   ),
                   textAlign: TextAlign.center,
@@ -187,13 +188,13 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          Color(0xFF10B981),
-                          Color(0xFF059669),
+                          AppTheme.primaryGreen,
+                          AppTheme.darkGreen,
                         ],
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                          color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                           blurRadius: 10,
                           offset: const Offset(0, 5),
                         ),
@@ -222,7 +223,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                   '권한을 허용하지 않으면 일부 기능이 제한될 수 있습니다',
                   style: TextStyle(
                     fontSize: 14.0,
-                    color: Color(0xFF9CA3AF),
+                    color: AppTheme.textDisabled,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -261,7 +262,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
             height: 50,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: granted ? const Color(0xFF10B981) : const Color(0xFF9CA3AF),
+              color: granted ? AppTheme.primaryGreen : AppTheme.textDisabled,
             ),
             child: Icon(
               icon,
@@ -281,7 +282,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                   style: const TextStyle(
                     fontSize: 16.0,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
+                    color: AppTheme.textMedium,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -289,7 +290,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                   description,
                   style: const TextStyle(
                     fontSize: 14.0,
-                    color: Color(0xFF6B7280),
+                    color: AppTheme.textLight,
                   ),
                 ),
               ],
@@ -298,7 +299,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
           
           Icon(
             granted ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: granted ? const Color(0xFF10B981) : const Color(0xFF9CA3AF),
+            color: granted ? AppTheme.primaryGreen : AppTheme.textDisabled,
             size: 24,
           ),
         ],

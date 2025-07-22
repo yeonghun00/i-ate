@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:thanks_everyday/screens/permission_guide_screen.dart';
 import 'package:thanks_everyday/screens/special_permission_guide_screen.dart';
+import 'package:thanks_everyday/theme/app_theme.dart';
 
 class GuideScreen extends StatefulWidget {
   final VoidCallback onGuideComplete;
@@ -20,43 +21,43 @@ class _GuideScreenState extends State<GuideScreen> {
       title: '환영합니다!',
       description: '식사 기록 앱 사용법을\n간단히 알려드릴게요',
       icon: Icons.waving_hand,
-      color: Color(0xFF10B981),
+      color: AppTheme.primaryGreen,
     ),
     GuideStep(
       title: '식사 기록 버튼',
       description: '화면 가운데 큰 버튼을\n눌러서 식사를 기록하세요',
       icon: Icons.restaurant_rounded,
-      color: Color(0xFF10B981),
+      color: AppTheme.primaryGreen,
     ),
     GuideStep(
       title: '위치도 함께',
       description: '원하시면 위치도\n함께 추가할 수 있어요',
       icon: Icons.gps_fixed_outlined,
-      color: Color(0xFF3B82F6),
+      color: AppTheme.accentBlue,
     ),
     GuideStep(
       title: '하루 3번까지',
       description: '하루에 3번까지\n식사를 기록할 수 있어요',
       icon: Icons.fastfood_rounded,
-      color: Color(0xFFEC4899),
+      color: AppTheme.accentPink,
     ),
     GuideStep(
       title: '가족과 공유',
       description: '가족들이 당신의 식사\n상황을 확인할 수 있어요',
       icon: Icons.family_restroom,
-      color: Color(0xFF8B5CF6),
+      color: AppTheme.accentPurple,
     ),
     GuideStep(
       title: '특별 권한 설정',
       description: '휴대폰 사용 모니터링을 위한\n특별 권한이 필요해요',
       icon: Icons.admin_panel_settings,
-      color: Color(0xFF8B5CF6),
+      color: AppTheme.accentPurple,
     ),
     GuideStep(
       title: '시작할 준비 완료!',
       description: '이제 오늘 좋았던 일을\n말씀해주세요',
       icon: Icons.celebration,
-      color: Color(0xFFF59E0B),
+      color: AppTheme.accentOrange,
     ),
   ];
 
@@ -121,11 +122,7 @@ class _GuideScreenState extends State<GuideScreen> {
           width: double.infinity,
           height: double.infinity,
           decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFF8F9FA), Color(0xFFE9ECEF)],
-            ),
+            gradient: AppTheme.backgroundGradient,
           ),
           child: Column(
             children: [
@@ -140,8 +137,8 @@ class _GuideScreenState extends State<GuideScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 2),
                         decoration: BoxDecoration(
                           color: index <= _currentPage
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFE5E7EB),
+                              ? AppTheme.primaryGreen
+                              : AppTheme.borderLight,
                           borderRadius: BorderRadius.circular(3),
                         ),
                       ),
@@ -198,7 +195,7 @@ class _GuideScreenState extends State<GuideScreen> {
                               Icon(
                                 Icons.arrow_back,
                                 size: 20,
-                                color: Color(0xFF6B7280),
+                                color: AppTheme.textLight,
                               ),
                               SizedBox(width: 8),
                               Text(
@@ -206,7 +203,7 @@ class _GuideScreenState extends State<GuideScreen> {
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF6B7280),
+                                  color: AppTheme.textLight,
                                 ),
                               ),
                             ],
@@ -222,7 +219,7 @@ class _GuideScreenState extends State<GuideScreen> {
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
-                        color: Color(0xFF6B7280),
+                        color: AppTheme.textLight,
                       ),
                     ),
 
@@ -235,17 +232,11 @@ class _GuideScreenState extends State<GuideScreen> {
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFF10B981), Color(0xFF059669)],
-                          ),
+                          gradient: AppTheme.primaryGradient,
                           borderRadius: BorderRadius.circular(25),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(
-                                0xFF10B981,
-                              ).withValues(alpha: 0.3),
+                              color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                               blurRadius: 8,
                               offset: const Offset(0, 3),
                             ),
@@ -320,7 +311,7 @@ class _GuideScreenState extends State<GuideScreen> {
             style: const TextStyle(
               fontSize: 32.0,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF2E3440),
+              color: AppTheme.textSecondary,
             ),
             textAlign: TextAlign.center,
           ),
@@ -332,7 +323,7 @@ class _GuideScreenState extends State<GuideScreen> {
             step.description,
             style: const TextStyle(
               fontSize: 20.0,
-              color: Color(0xFF6B7280),
+              color: AppTheme.textLight,
               height: 1.5,
             ),
             textAlign: TextAlign.center,

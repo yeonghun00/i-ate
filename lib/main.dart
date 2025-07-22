@@ -11,6 +11,7 @@ import 'package:thanks_everyday/services/overlay_service.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
+import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
 
 void main() async {
@@ -56,13 +57,7 @@ class ThanksEverydayApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '식사 기록',
-      theme: ThemeData(
-        primarySwatch: Colors.red,
-        scaffoldBackgroundColor: const Color(0xFFF8F9FA),
-        useMaterial3: true,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        fontFamily: 'NotoSans',
-      ),
+      theme: AppTheme.appTheme,
       home: const AppWrapper(),
       debugShowCheckedModeBanner: false,
     );
@@ -164,7 +159,7 @@ class _AppWrapperState extends State<AppWrapper> {
       return const Scaffold(
         body: Center(
           child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
+            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGreen),
           ),
         ),
       );
@@ -287,8 +282,8 @@ class _HomePageState extends State<HomePage> {
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
           ),
           backgroundColor: message.contains('실패') || message.contains('오류')
-              ? const Color(0xFFEF4444)
-              : const Color(0xFF10B981),
+              ? AppTheme.errorRed
+              : AppTheme.primaryGreen,
           duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
@@ -335,11 +330,7 @@ class _HomePageState extends State<HomePage> {
           width: double.infinity,
           height: double.infinity,
           decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFF8F9FA), Color(0xFFE9ECEF)],
-            ),
+            gradient: AppTheme.backgroundGradient,
           ),
           child: Column(
             children: [
@@ -369,7 +360,7 @@ class _HomePageState extends State<HomePage> {
                         child: const Icon(
                           Icons.settings,
                           size: 24,
-                          color: Color(0xFF6B7280),
+                          color: AppTheme.settingsIconColor,
                         ),
                       ),
                     ),
@@ -449,7 +440,7 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF10B981),
+                color: AppTheme.celebrationColor,
               ),
               textAlign: TextAlign.center,
             ),
@@ -461,7 +452,7 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF1F2937),
+                color: AppTheme.textPrimary,
                 height: 1.4,
               ),
               textAlign: TextAlign.center,
@@ -475,12 +466,10 @@ class _HomePageState extends State<HomePage> {
               height: 120,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF10B981), Color(0xFF059669)],
-                ),
+                gradient: AppTheme.successGradient,
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                    color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                     blurRadius: 20,
                     offset: const Offset(0, 8),
                   ),
@@ -499,7 +488,7 @@ class _HomePageState extends State<HomePage> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8F9FA),
+                color: AppTheme.backgroundLight,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
@@ -509,7 +498,7 @@ class _HomePageState extends State<HomePage> {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF10B981),
+                      color: AppTheme.progressColor,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -518,7 +507,7 @@ class _HomePageState extends State<HomePage> {
                     '가족들이 당신의 식사 상황을\n확인할 수 있어서 안심할 거예요',
                     style: TextStyle(
                       fontSize: 16,
-                      color: Color(0xFF6B7280),
+                      color: AppTheme.textLight,
                       fontWeight: FontWeight.w500,
                       height: 1.5,
                     ),
@@ -529,7 +518,7 @@ class _HomePageState extends State<HomePage> {
                     '내일 또 만나요! 😊',
                     style: TextStyle(
                       fontSize: 16,
-                      color: Color(0xFF10B981),
+                      color: AppTheme.progressColor,
                       fontWeight: FontWeight.w600,
                     ),
                     textAlign: TextAlign.center,
@@ -571,8 +560,8 @@ class _HomePageState extends State<HomePage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: index < _todayMealCount
-                    ? const Color(0xFF10B981)
-                    : const Color(0xFFE5E7EB),
+                    ? AppTheme.progressColor
+                    : AppTheme.borderLight,
               ),
               child: index < _todayMealCount
                   ? const Icon(Icons.check, size: 10, color: Colors.white)
@@ -588,7 +577,7 @@ class _HomePageState extends State<HomePage> {
           '$_todayMealCount개 완료 / 3개',
           style: const TextStyle(
             fontSize: 16,
-            color: Color(0xFF6B7280),
+            color: AppTheme.textLight,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -627,7 +616,7 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF1F2937),
+                color: AppTheme.textPrimary,
                 height: 1.3,
               ),
               textAlign: TextAlign.center,
@@ -640,7 +629,7 @@ class _HomePageState extends State<HomePage> {
               '하루 3번까지 기록할 수 있어요',
               style: const TextStyle(
                 fontSize: 16,
-                color: Color(0xFF6B7280),
+                color: AppTheme.textLight,
                 fontWeight: FontWeight.w500,
               ),
               textAlign: TextAlign.center,
@@ -652,7 +641,7 @@ class _HomePageState extends State<HomePage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8F9FA),
+                color: AppTheme.backgroundLight,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
@@ -664,7 +653,7 @@ class _HomePageState extends State<HomePage> {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F2937),
+                      color: AppTheme.textPrimary,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -674,7 +663,7 @@ class _HomePageState extends State<HomePage> {
                       '마지막 식사: ${FoodTrackingService.formatTimeSinceLastIntake(_lastMealTime)}',
                       style: const TextStyle(
                         fontSize: 14,
-                        color: Color(0xFF059669),
+                        color: AppTheme.darkGreen,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.center,
@@ -699,19 +688,17 @@ class _HomePageState extends State<HomePage> {
                     shape: BoxShape.circle,
                     gradient: _isSaving
                         ? const LinearGradient(
-                            colors: [Color(0xFF9CA3AF), Color(0xFF6B7280)],
+                            colors: [AppTheme.textDisabled, AppTheme.textLight],
                           )
                         : _todayMealCount >= _maxMealsPerDay
                         ? const LinearGradient(
-                            colors: [Color(0xFFE5E7EB), Color(0xFFD1D5DB)],
+                            colors: [AppTheme.borderLight, Color(0xFFD1D5DB)],
                           )
-                        : const LinearGradient(
-                            colors: [Color(0xFF10B981), Color(0xFF059669)],
-                          ),
+                        : AppTheme.successGradient,
                     boxShadow: [
                       if (!_isSaving && _todayMealCount < _maxMealsPerDay)
                         BoxShadow(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                          color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                           blurRadius: 20,
                           offset: const Offset(0, 8),
                         ),
@@ -732,7 +719,7 @@ class _HomePageState extends State<HomePage> {
                           Icons.restaurant_rounded,
                           size: 60,
                           color: _todayMealCount >= _maxMealsPerDay
-                              ? const Color(0xFF9CA3AF)
+                              ? AppTheme.textDisabled
                               : Colors.white,
                         ),
                 ),
@@ -752,10 +739,10 @@ class _HomePageState extends State<HomePage> {
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
                 color: _isSaving
-                    ? const Color(0xFF6B7280)
+                    ? AppTheme.textLight
                     : _todayMealCount >= _maxMealsPerDay
-                    ? const Color(0xFF9CA3AF)
-                    : const Color(0xFF059669),
+                    ? AppTheme.textDisabled
+                    : AppTheme.darkGreen,
               ),
               textAlign: TextAlign.center,
             ),

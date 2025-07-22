@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thanks_everyday/services/fcm_v1_service.dart';
 import 'dart:math';
 
 class FirebaseService {
@@ -18,6 +19,9 @@ class FirebaseService {
   // Initialize Firebase and check for existing family code
   Future<bool> initialize() async {
     try {
+      // Initialize FCM v1 service
+      await FCMv1Service.initialize();
+      
       // Sign in anonymously for Firebase Auth
       try {
         if (_auth.currentUser == null) {
@@ -261,6 +265,20 @@ class FirebaseService {
         'lastMealTime': timestamp.toIso8601String(),
         'todayMealCount': currentMealCount, // Set actual count, don't increment
       });
+      
+      // Send FCM notification to child app
+      try {
+        await FCMv1Service.sendMealNotification(
+          familyId: _familyId!,
+          elderlyName: _elderlyName ?? '부모님',
+          timestamp: timestamp,
+          mealNumber: mealNumber,
+        );
+        print('FCM meal notification sent successfully');
+      } catch (e) {
+        print('Failed to send FCM meal notification: $e');
+        // Don't fail the entire meal recording if FCM fails
+      }
       
       return true;
       
@@ -534,6 +552,23 @@ class FirebaseService {
         }
       });
       
+      // Send FCM notification for survival alert
+      try {
+        // Extract hours from message (assumes format like "12시간 이상...")
+        final hoursMatch = RegExp(r'(\d+)시간').firstMatch(message);
+        final hoursInactive = hoursMatch != null ? int.parse(hoursMatch.group(1)!) : 12;
+        
+        await FCMv1Service.sendSurvivalAlert(
+          familyId: familyCode,
+          elderlyName: elderlyName,
+          hoursInactive: hoursInactive,
+        );
+        print('FCM survival alert notification sent');
+      } catch (e) {
+        print('Failed to send FCM survival alert notification: $e');
+        // Don't fail the entire alert if FCM fails
+      }
+      
       print('Survival alert sent to family: $familyCode');
       return true;
     } catch (e) {
@@ -583,6 +618,19 @@ class FirebaseService {
           'hoursWithoutFood': hoursWithoutFood,
         }
       });
+      
+      // Send FCM notification for food alert
+      try {
+        await FCMv1Service.sendFoodAlert(
+          familyId: _familyId!,
+          elderlyName: elderlyName,
+          hoursWithoutFood: hoursWithoutFood ?? 8,
+        );
+        print('FCM food alert notification sent');
+      } catch (e) {
+        print('Failed to send FCM food alert notification: $e');
+        // Don't fail the entire alert if FCM fails
+      }
       
       print('Food alert sent to family: $message');
       return true;

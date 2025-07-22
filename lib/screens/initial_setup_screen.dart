@@ -5,6 +5,7 @@ import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/survival_signal_service.dart';
 import 'package:thanks_everyday/screens/guide_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
+import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
 
 class InitialSetupScreen extends StatefulWidget {
@@ -365,11 +366,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           width: double.infinity,
           height: double.infinity,
           decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFF8F9FA), Color(0xFFE9ECEF)],
-            ),
+            gradient: AppTheme.backgroundGradient,
           ),
           child:
               // Main content
@@ -401,7 +398,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                         style: TextStyle(
                           fontSize: 28.0,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF2E3440),
+                          color: AppTheme.textSecondary,
                         ),
                       ),
                     ),
@@ -415,7 +412,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                         style: TextStyle(
                           fontSize: 28.0,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF10B981),
+                          color: AppTheme.primaryGreen,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -425,7 +422,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                       Container(
                         padding: const EdgeInsets.all(30),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981),
+                          color: AppTheme.primaryGreen,
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
@@ -495,7 +492,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                               style: const TextStyle(
                                 fontSize: 18.0,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF2E3440),
+                                color: AppTheme.textSecondary,
                               ),
                               textAlign: TextAlign.center,
                             ),
@@ -506,7 +503,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                   : '자녀가 이 코드로 당신의 감사 이야기를 들을 수 있습니다.',
                               style: const TextStyle(
                                 fontSize: 16.0,
-                                color: Color(0xFF6B7280),
+                                color: AppTheme.textLight,
                                 height: 1.4,
                               ),
                               textAlign: TextAlign.center,
@@ -538,7 +535,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                     Icon(
                                       Icons.timer,
                                       size: 16,
-                                      color: const Color(0xFFEF4444),
+                                      color: AppTheme.errorRed,
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
@@ -546,7 +543,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       style: const TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFFEF4444),
+                                        color: AppTheme.errorRed,
                                       ),
                                     ),
                                   ],
@@ -558,7 +555,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                               const SizedBox(height: 12),
                               const CircularProgressIndicator(
                                 valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF10B981),
+                                  AppTheme.primaryGreen,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -575,7 +572,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                     ).withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: const Color(0xFF10B981),
+                                      color: AppTheme.primaryGreen,
                                       width: 1,
                                     ),
                                   ),
@@ -584,7 +581,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                     style: TextStyle(
                                       fontSize: 14.0,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFF10B981),
+                                      color: AppTheme.primaryGreen,
                                     ),
                                   ),
                                 ),
@@ -604,7 +601,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                           height: 70,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(35),
-                            color: const Color(0xFFE5E7EB),
+                            color: AppTheme.borderLight,
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.1),
@@ -619,7 +616,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                               style: TextStyle(
                                 fontSize: 18.0,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF9CA3AF),
+                                color: AppTheme.textDisabled,
                               ),
                             ),
                           ),
@@ -652,7 +649,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                             style: TextStyle(
                               fontSize: 16.0,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF6B7280),
+                              color: AppTheme.textLight,
                             ),
                           ),
                         ),
@@ -662,7 +659,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                       const Icon(
                         Icons.settings_outlined,
                         size: 60,
-                        color: Color(0xFF10B981),
+                        color: AppTheme.primaryGreen,
                       ),
 
                       const SizedBox(height: 30),
@@ -699,7 +696,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                               style: TextStyle(
                                 fontSize: 20.0,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF2E3440),
+                                color: AppTheme.textSecondary,
                               ),
                             ),
 
@@ -709,14 +706,14 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF3F4F6),
+                                color: AppTheme.backgroundCard,
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Row(
                                 children: [
                                   const Icon(
                                     Icons.restaurant_rounded,
-                                    color: Color(0xFF10B981),
+                                    color: AppTheme.primaryGreen,
                                     size: 24,
                                   ),
                                   const SizedBox(width: 12),
@@ -725,7 +722,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       '식사 기록 앱으로 하루 3번의 식사를 기록할 수 있습니다',
                                       style: TextStyle(
                                         fontSize: 14,
-                                        color: Color(0xFF374151),
+                                        color: AppTheme.textMedium,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -768,7 +765,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF3F4F6),
+                                  color: AppTheme.backgroundCard,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Column(
@@ -779,7 +776,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       style: TextStyle(
                                         fontSize: 16.0,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF374151),
+                                        color: AppTheme.textMedium,
                                       ),
                                     ),
                                     const SizedBox(height: 12),
@@ -835,7 +832,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       '$_alertHours시간 이상 휴대폰을 사용하지 않으면 자녀에게 알림이 전송됩니다.',
                                       style: const TextStyle(
                                         fontSize: 14.0,
-                                        color: Color(0xFF6B7280),
+                                        color: AppTheme.textLight,
                                         height: 1.4,
                                       ),
                                     ),
@@ -857,16 +854,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                           height: 70,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(35),
-                            gradient: const LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [Color(0xFF10B981), Color(0xFF059669)],
-                            ),
+                            gradient: AppTheme.primaryGradient,
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(
-                                  0xFF10B981,
-                                ).withValues(alpha: 0.3),
+                                color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                                 blurRadius: 10,
                                 offset: const Offset(0, 5),
                               ),
@@ -941,7 +932,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                 color: Color(0xFF9CA3AF),
                 fontSize: 16.0,
               ),
-              prefixIcon: Icon(icon, color: const Color(0xFF10B981)),
+              prefixIcon: Icon(icon, color: AppTheme.primaryGreen),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 16),
             ),
@@ -985,7 +976,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: const Color(0xFF10B981),
+          activeColor: AppTheme.primaryGreen,
         ),
       ],
     );
