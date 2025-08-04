@@ -11,17 +11,17 @@ class FirebaseService {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  
+
   String? _familyId;
   String? _familyCode;
   String? _elderlyName;
-  
+
   // Initialize Firebase and check for existing family code
   Future<bool> initialize() async {
     try {
       // Initialize FCM v1 service
       await FCMv1Service.initialize();
-      
+
       // Sign in anonymously for Firebase Auth
       try {
         if (_auth.currentUser == null) {
@@ -30,12 +30,12 @@ class FirebaseService {
       } catch (authError) {
         print('Firebase Auth failed, continuing without auth: $authError');
       }
-      
+
       // Check if family code exists locally with retry logic
       SharedPreferences? prefs;
       int retryCount = 0;
       const maxRetries = 3;
-      
+
       while (prefs == null && retryCount < maxRetries) {
         try {
           prefs = await SharedPreferences.getInstance();
@@ -47,7 +47,7 @@ class FirebaseService {
           }
         }
       }
-      
+
       if (prefs != null) {
         _familyId = prefs.getString('family_id');
         _familyCode = prefs.getString('family_code');
@@ -57,48 +57,53 @@ class FirebaseService {
         // If SharedPreferences fails, we'll continue without local storage
         // The app will still work but won't persist the family code
       }
-      
+
       return _familyCode != null;
     } catch (e) {
       print('Firebase initialization failed: $e');
       return false;
     }
   }
-  
+
   // Generate a unique 4-digit connection code
   Future<String> _generateConnectionCode() async {
     String code;
     bool isUnique = false;
-    
+
     do {
       // Generate 4-digit code
       code = (1000 + Random().nextInt(9000)).toString();
-      
+
       // Check if connection code already exists
-      final query = await _firestore.collection('families')
+      final query = await _firestore
+          .collection('families')
           .where('connectionCode', isEqualTo: code)
           .limit(1)
           .get();
       isUnique = query.docs.isEmpty;
     } while (!isUnique);
-    
+
     return code;
   }
-  
+
   // Generate a unique family ID
   String _generateFamilyId() {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final random = Random().nextInt(99999);
     return 'family_${timestamp}_$random';
   }
-  
+
   // Set up family code (called by family member)
   Future<String?> setupFamilyCode(String elderlyName) async {
     try {
       final connectionCode = await _generateConnectionCode();
       final familyId = _generateFamilyId();
-      
-      final success = await _setupFamilyDocument(familyId, connectionCode, elderlyName);
+
+      final success = await _setupFamilyDocument(
+        familyId,
+        connectionCode,
+        elderlyName,
+      );
       if (success) {
         return connectionCode;
       }
@@ -110,7 +115,11 @@ class FirebaseService {
   }
 
   // Set up family document with unique ID and connection code
-  Future<bool> _setupFamilyDocument(String familyId, String connectionCode, String elderlyName) async {
+  Future<bool> _setupFamilyDocument(
+    String familyId,
+    String connectionCode,
+    String elderlyName,
+  ) async {
     try {
       // Create family document with unique ID
       await _firestore.collection('families').doc(familyId).set({
@@ -120,18 +129,13 @@ class FirebaseService {
         'createdAt': FieldValue.serverTimestamp(),
         'deviceInfo': 'Android Device',
         'isActive': true,
-        'lastActivity': FieldValue.serverTimestamp(),
         'approved': null, // null = pending, true = approved, false = rejected
         'settings': {
           'survivalSignalEnabled': false,
           'familyContact': '',
           'alertHours': 12,
         },
-        'survivalAlert': {
-          'isActive': false,
-          'timestamp': null,
-          'message': '',
-        },
+        'survivalAlert': {'isActive': false, 'timestamp': null, 'message': ''},
         'foodAlert': {
           'isActive': false,
           'timestamp': null,
@@ -140,10 +144,9 @@ class FirebaseService {
           'lastFoodIntake': null,
           'hoursWithoutFood': null,
         },
-        'lastFoodIntake': {
-          'timestamp': null,
-          'todayCount': 0,
-        },
+        'lastFoodIntake': {'timestamp': null, 'todayCount': 0},
+        // Child app compatibility fields
+        'lastMealTime': null,
         'todayMealCount': 0,
         'location': {
           'latitude': null,
@@ -151,13 +154,14 @@ class FirebaseService {
           'timestamp': null,
           'address': '',
         },
+        'lastPhoneActivity': null, // Initialize field for phone activity tracking
       });
-      
+
       // Save locally with retry logic
       SharedPreferences? prefs;
       int retryCount = 0;
       const maxRetries = 3;
-      
+
       while (prefs == null && retryCount < maxRetries) {
         try {
           prefs = await SharedPreferences.getInstance();
@@ -169,32 +173,33 @@ class FirebaseService {
           }
         }
       }
-      
+
       if (prefs != null) {
         await prefs.setString('family_id', familyId);
         await prefs.setString('family_code', connectionCode);
         await prefs.setString('elderly_name', elderlyName);
       }
-      
+
       _familyId = familyId;
       _familyCode = connectionCode;
       _elderlyName = elderlyName;
-      
+
       return true;
     } catch (e) {
       print('Failed to setup family document: $e');
       return false;
     }
   }
-  
+
   // Verify family code exists (for family members)
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     try {
-      final query = await _firestore.collection('families')
+      final query = await _firestore
+          .collection('families')
           .where('connectionCode', isEqualTo: connectionCode)
           .limit(1)
           .get();
-      
+
       if (query.docs.isNotEmpty) {
         final doc = query.docs.first;
         final data = doc.data();
@@ -207,8 +212,7 @@ class FirebaseService {
       return null;
     }
   }
-  
-  
+
   // Save meal record with simplified approach
   Future<bool> saveMealRecord({
     required DateTime timestamp,
@@ -219,21 +223,23 @@ class FirebaseService {
         print('No family code or ID available');
         return false;
       }
-      
+
       // Get today's date string
       final today = DateTime.now();
-      final dateString = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-      
+      final dateString =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
       // Create meal record with unique ID to prevent duplicates
-      final mealId = '${timestamp.millisecondsSinceEpoch}_${mealNumber}';
+      final mealId = '${timestamp.millisecondsSinceEpoch}_$mealNumber';
       final mealData = {
         'mealId': mealId,
         'timestamp': timestamp.toIso8601String(),
         'mealNumber': mealNumber,
         'elderlyName': _elderlyName,
-        'createdAt': timestamp.toIso8601String(), // Use regular timestamp instead of serverTimestamp
+        'createdAt': timestamp
+            .toIso8601String(), // Use regular timestamp instead of serverTimestamp
       };
-      
+
       // Use simpler approach with FieldValue.arrayUnion
       await _firestore
           .collection('families')
@@ -241,12 +247,11 @@ class FirebaseService {
           .collection('meals')
           .doc(dateString)
           .set({
-        'meals': FieldValue.arrayUnion([mealData]),
-        'date': dateString,
-        'elderlyName': _elderlyName,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
+            'meals': FieldValue.arrayUnion([mealData]),
+            'date': dateString,
+            'elderlyName': _elderlyName,
+          }, SetOptions(merge: true));
+
       // Get current meal count from the document we just updated
       final updatedDoc = await _firestore
           .collection('families')
@@ -254,18 +259,22 @@ class FirebaseService {
           .collection('meals')
           .doc(dateString)
           .get();
-      
-      final currentMealCount = updatedDoc.exists 
+
+      final currentMealCount = updatedDoc.exists
           ? (updatedDoc.data()?['meals'] as List<dynamic>?)?.length ?? 0
           : 0;
-      
-      // Update family document with actual count from meals collection
+
+      // Update family document with cleaned structure + child app compatibility
       await _firestore.collection('families').doc(_familyId).update({
-        'lastActive': FieldValue.serverTimestamp(),
-        'lastMealTime': timestamp.toIso8601String(),
-        'todayMealCount': currentMealCount, // Set actual count, don't increment
+        'lastFoodIntake': {
+          'timestamp': FieldValue.serverTimestamp(),
+          'todayCount': currentMealCount,
+        },
+        // Child app compatibility fields
+        'lastMealTime': FieldValue.serverTimestamp(),
+        'todayMealCount': currentMealCount,
       });
-      
+
       // Send FCM notification to child app
       try {
         await FCMv1Service.sendMealNotification(
@@ -279,64 +288,53 @@ class FirebaseService {
         print('Failed to send FCM meal notification: $e');
         // Don't fail the entire meal recording if FCM fails
       }
-      
+
       return true;
-      
     } catch (e) {
       print('Failed to save meal record: $e');
       return false;
     }
   }
-  
-  // Get today's meal count with fallback to family document
+
+  // Get today's meal count from subcollection only
   Future<int> getTodayMealCount() async {
     try {
       if (_familyCode == null || _familyId == null) return 0;
-      
+
       final today = DateTime.now();
-      final dateString = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-      
-      // Try to get from meal document first
+      final dateString =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+      // Get count from meals subcollection only (single source of truth)
       final mealDoc = await _firestore
           .collection('families')
           .doc(_familyId)
           .collection('meals')
           .doc(dateString)
           .get();
-      
+
       if (mealDoc.exists) {
         final data = mealDoc.data();
         final meals = data?['meals'] as List<dynamic>?;
         return meals?.length ?? 0;
       }
-      
-      // Fallback to family document
-      final familyDoc = await _firestore
-          .collection('families')
-          .doc(_familyId)
-          .get();
-      
-      if (familyDoc.exists) {
-        final data = familyDoc.data();
-        final todayCount = data?['todayMealCount'] as int?;
-        return todayCount ?? 0;
-      }
-      
-      return 0;
+
+      return 0; // No meals recorded today
     } catch (e) {
       print('Failed to get today\'s meal count: $e');
       return 0;
     }
   }
-  
+
   // CRITICAL: Method for child app to resolve family ID from connection code
   Future<String?> getFamilyIdFromConnectionCode(String connectionCode) async {
     try {
-      final query = await _firestore.collection('families')
+      final query = await _firestore
+          .collection('families')
           .where('connectionCode', isEqualTo: connectionCode)
           .limit(1)
           .get();
-      
+
       if (query.docs.isNotEmpty) {
         return query.docs.first.id; // This is the actual familyId
       }
@@ -346,64 +344,67 @@ class FirebaseService {
       return null;
     }
   }
-  
+
   // Enhanced method for child app to get family data with proper ID resolution
-  Future<Map<String, dynamic>?> getFamilyDataForChild(String connectionCode) async {
+  Future<Map<String, dynamic>?> getFamilyDataForChild(
+    String connectionCode,
+  ) async {
     try {
       // First resolve the family ID
       final familyId = await getFamilyIdFromConnectionCode(connectionCode);
       if (familyId == null) return null;
-      
+
       // Get the family document
       final familyDoc = await _firestore
           .collection('families')
           .doc(familyId)
           .get();
-      
+
       if (familyDoc.exists) {
         final data = familyDoc.data()!;
         data['familyId'] = familyId; // Include resolved family ID
         return data;
       }
-      
+
       return null;
     } catch (e) {
       print('Failed to get family data for child: $e');
       return null;
     }
   }
-  
+
   // Child app method to get meals for a specific date
   Future<List<Map<String, dynamic>>> getMealsForDate(
-    String connectionCode, 
-    DateTime date
+    String connectionCode,
+    DateTime date,
   ) async {
     try {
       final familyId = await getFamilyIdFromConnectionCode(connectionCode);
       if (familyId == null) return [];
-      
-      final dateString = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-      
+
+      final dateString =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
       final doc = await _firestore
           .collection('families')
           .doc(familyId)
           .collection('meals')
           .doc(dateString)
           .get();
-      
+
       if (doc.exists) {
         final data = doc.data();
         final meals = data?['meals'] as List<dynamic>? ?? [];
         return meals.map((meal) => Map<String, dynamic>.from(meal)).toList();
       }
-      
+
       return [];
     } catch (e) {
       print('Failed to get meals for date: $e');
       return [];
     }
   }
-  
+
   // Update family settings
   Future<bool> updateFamilySettings({
     required bool survivalSignalEnabled,
@@ -415,18 +416,19 @@ class FirebaseService {
         print('Cannot update family settings: no family ID');
         return false;
       }
-      
+
       print('Updating family settings for ID: $_familyId');
-      print('Settings: survivalSignal=$survivalSignalEnabled, alertHours=${alertHours ?? 12}');
-      
+      print(
+        'Settings: survivalSignal=$survivalSignalEnabled, alertHours=${alertHours ?? 12}',
+      );
+
       // Update individual fields instead of replacing the entire settings object
       await _firestore.collection('families').doc(_familyId).update({
         'settings.survivalSignalEnabled': survivalSignalEnabled,
         'settings.familyContact': familyContact,
         'settings.alertHours': alertHours ?? 12,
-        'lastUpdated': FieldValue.serverTimestamp(),
       });
-      
+
       print('Family settings updated successfully');
       return true;
     } catch (e) {
@@ -439,15 +441,16 @@ class FirebaseService {
   Future<bool> deleteFamilyCode(String connectionCode) async {
     try {
       // Find family by connection code
-      final query = await _firestore.collection('families')
+      final query = await _firestore
+          .collection('families')
           .where('connectionCode', isEqualTo: connectionCode)
           .limit(1)
           .get();
-      
+
       if (query.docs.isNotEmpty) {
         final doc = query.docs.first;
         await doc.reference.delete();
-        
+
         // Clear local storage if this was our code
         if (_familyCode == connectionCode) {
           final prefs = await SharedPreferences.getInstance();
@@ -458,10 +461,10 @@ class FirebaseService {
           _familyCode = null;
           _elderlyName = null;
         }
-        
+
         return true;
       }
-      
+
       return false;
     } catch (e) {
       print('Failed to delete family code: $e');
@@ -472,30 +475,33 @@ class FirebaseService {
   // Listen for approval status changes
   Stream<bool?> listenForApproval(String connectionCode) async* {
     print('Setting up Firebase listener for connection code: $connectionCode');
-    
+
     // First find the family document by connection code
-    final query = await _firestore.collection('families')
+    final query = await _firestore
+        .collection('families')
         .where('connectionCode', isEqualTo: connectionCode)
         .limit(1)
         .get();
-    
+
     if (query.docs.isEmpty) {
       print('No family found with connection code: $connectionCode');
       yield null;
       return;
     }
-    
+
     final familyId = query.docs.first.id;
     print('Found family ID: $familyId for connection code: $connectionCode');
-    
+
     // Listen to the family document by ID
-    await for (final snapshot in _firestore
-        .collection('families')
-        .doc(familyId)
-        .snapshots(includeMetadataChanges: true)) {
-      
-      print('Firebase snapshot received for family ID $familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}');
-      
+    await for (final snapshot
+        in _firestore
+            .collection('families')
+            .doc(familyId)
+            .snapshots(includeMetadataChanges: true)) {
+      print(
+        'Firebase snapshot received for family ID $familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}',
+      );
+
       if (snapshot.exists) {
         final data = snapshot.data();
         final approved = data?['approved'] as bool?;
@@ -512,16 +518,17 @@ class FirebaseService {
   Future<bool> setApprovalStatus(String connectionCode, bool approved) async {
     try {
       // Find family by connection code
-      final query = await _firestore.collection('families')
+      final query = await _firestore
+          .collection('families')
           .where('connectionCode', isEqualTo: connectionCode)
           .limit(1)
           .get();
-      
+
       if (query.docs.isEmpty) {
         print('No family found with connection code: $connectionCode');
         return false;
       }
-      
+
       final familyId = query.docs.first.id;
       await _firestore.collection('families').doc(familyId).update({
         'approved': approved,
@@ -549,15 +556,17 @@ class FirebaseService {
           'elderlyName': elderlyName,
           'message': message,
           'isActive': true,
-        }
+        },
       });
-      
+
       // Send FCM notification for survival alert
       try {
         // Extract hours from message (assumes format like "12시간 이상...")
         final hoursMatch = RegExp(r'(\d+)시간').firstMatch(message);
-        final hoursInactive = hoursMatch != null ? int.parse(hoursMatch.group(1)!) : 12;
-        
+        final hoursInactive = hoursMatch != null
+            ? int.parse(hoursMatch.group(1)!)
+            : 12;
+
         await FCMv1Service.sendSurvivalAlert(
           familyId: familyCode,
           elderlyName: elderlyName,
@@ -568,7 +577,7 @@ class FirebaseService {
         print('Failed to send FCM survival alert notification: $e');
         // Don't fail the entire alert if FCM fails
       }
-      
+
       print('Survival alert sent to family: $familyCode');
       return true;
     } catch (e) {
@@ -581,12 +590,12 @@ class FirebaseService {
   Future<bool> clearSurvivalAlert() async {
     try {
       if (_familyId == null) return false;
-      
+
       await _firestore.collection('families').doc(_familyId).update({
         'survivalAlert.isActive': false,
         'survivalAlert.clearedAt': FieldValue.serverTimestamp(),
       });
-      
+
       print('Survival alert cleared');
       return true;
     } catch (e) {
@@ -607,7 +616,7 @@ class FirebaseService {
         print('Cannot send food alert: no family ID');
         return false;
       }
-      
+
       await _firestore.collection('families').doc(_familyId).update({
         'foodAlert': {
           'timestamp': FieldValue.serverTimestamp(),
@@ -616,9 +625,9 @@ class FirebaseService {
           'isActive': true,
           'lastFoodIntake': lastFoodIntake?.toIso8601String(),
           'hoursWithoutFood': hoursWithoutFood,
-        }
+        },
       });
-      
+
       // Send FCM notification for food alert
       try {
         await FCMv1Service.sendFoodAlert(
@@ -631,7 +640,7 @@ class FirebaseService {
         print('Failed to send FCM food alert notification: $e');
         // Don't fail the entire alert if FCM fails
       }
-      
+
       print('Food alert sent to family: $message');
       return true;
     } catch (e) {
@@ -644,12 +653,12 @@ class FirebaseService {
   Future<bool> clearFoodAlert() async {
     try {
       if (_familyId == null) return false;
-      
+
       await _firestore.collection('families').doc(_familyId).update({
         'foodAlert.isActive': false,
         'foodAlert.clearedAt': FieldValue.serverTimestamp(),
       });
-      
+
       print('Food alert cleared');
       return true;
     } catch (e) {
@@ -668,19 +677,41 @@ class FirebaseService {
         print('Cannot update food intake: no family ID');
         return false;
       }
-      
+
       await _firestore.collection('families').doc(_familyId).update({
         'lastFoodIntake': {
           'timestamp': FieldValue.serverTimestamp(),
           'todayCount': todayCount,
         },
+        // Child app compatibility fields
+        'lastMealTime': FieldValue.serverTimestamp(),
+        'todayMealCount': todayCount,
         'foodAlert.isActive': false, // Clear any active food alerts
       });
-      
+
       print('Food intake updated: $timestamp, count: $todayCount');
       return true;
     } catch (e) {
       print('Failed to update food intake: $e');
+      return false;
+    }
+  }
+
+  // Update general phone activity (any phone usage) in Firebase
+  Future<bool> updatePhoneActivity() async {
+    try {
+      
+      if (_familyId == null) {
+        print('Cannot update phone activity: no family ID');
+        return false;
+      }
+      
+      await _firestore.collection('families').doc(_familyId).update({
+        'lastPhoneActivity': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      print('Failed to update phone activity: $e');
       return false;
     }
   }
@@ -696,20 +727,42 @@ class FirebaseService {
         print('Cannot update location: no family ID');
         return false;
       }
-      
+
       await _firestore.collection('families').doc(_familyId).update({
         'location': {
           'latitude': latitude,
           'longitude': longitude,
           'timestamp': FieldValue.serverTimestamp(),
           'address': address ?? '',
-        }
+        },
       });
-      
+
       print('Location updated: $latitude, $longitude');
       return true;
     } catch (e) {
       print('Failed to update location: $e');
+      return false;
+    }
+  }
+
+  // Update alert settings in Firebase for Functions to use
+  Future<bool> updateAlertSettings({required int alertMinutes}) async {
+    try {
+      if (_familyId == null) {
+        print('Cannot update alert settings: no family ID');
+        return false;
+      }
+
+      await _firestore.collection('families').doc(_familyId).update({
+        'settings': {
+          'alertHours': alertMinutes / 60.0, // Convert minutes to hours for consistency
+        },
+      });
+
+      print('Alert settings updated: ${alertMinutes} minutes (${alertMinutes/60.0} hours)');
+      return true;
+    } catch (e) {
+      print('Failed to update alert settings: $e');
       return false;
     }
   }

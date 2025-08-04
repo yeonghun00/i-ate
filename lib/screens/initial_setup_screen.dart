@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
-import 'package:thanks_everyday/services/survival_signal_service.dart';
 import 'package:thanks_everyday/screens/guide_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
@@ -54,21 +53,25 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       );
 
       if (generatedCode != null) {
-        // Save family contact and settings
-        await SurvivalSignalService.setFamilyContact('');
-        await SurvivalSignalService.setSurvivalSignalEnabled(
-          _survivalSignalEnabled,
-        );
+        // Update Firebase settings
         await _firebaseService.updateFamilySettings(
           survivalSignalEnabled: _survivalSignalEnabled,
           familyContact: '',
           alertHours: _alertHours,
         );
 
-        // Save location tracking preference
+        // Save settings to SharedPreferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(
-          'location_tracking_enabled',
+          'flutter.survival_signal_enabled',
+          _survivalSignalEnabled,
+        );
+        await prefs.setInt(
+          'alert_hours',
+          _alertHours,
+        );
+        await prefs.setBool(
+          'flutter.location_tracking_enabled',
           _locationTrackingEnabled,
         );
 
@@ -294,7 +297,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
             _tempElderlyName = null;
             _tempContact = null;
             _nameController.clear();
-                  _survivalSignalEnabled = false;
+            _survivalSignalEnabled = false;
             _alertHours = 12;
             _locationTrackingEnabled = false;
           });
@@ -375,36 +378,6 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                 child: Column(
                   children: [
                     const SizedBox(height: 40),
-
-                    // App title
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: const Text(
-                        '식사 기록 앱 설정',
-                        style: TextStyle(
-                          fontSize: 28.0,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 40),
-
                     if (_generatedCode != null) ...[
                       // Show generated code
                       const Text(
@@ -655,11 +628,102 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                         ),
                       ),
                     ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              '식사하셨어요?',
+                              style: TextStyle(
+                                fontSize: 32.0,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primaryGreen,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              '부모님이 건강하게 잘 계시는지 확인하는 앱',
+                              style: TextStyle(
+                                fontSize: 16.0,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textMedium,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryGreen.withValues(
+                                  alpha: 0.1,
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: AppTheme.primaryGreen.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                  width: 1,
+                                ),
+                              ),
+                              child: const Text(
+                                '⚙️ 딱 한 번만 설정하면 됩니다',
+                                style: TextStyle(
+                                  fontSize: 14.0,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primaryGreen,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+
                       // Setup form
-                      const Icon(
-                        Icons.settings_outlined,
-                        size: 60,
-                        color: AppTheme.primaryGreen,
+                      Column(
+                        children: [
+                          const Icon(
+                            Icons.settings_outlined,
+                            size: 60,
+                            color: AppTheme.primaryGreen,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            '간단한 정보만 입력하세요',
+                            style: TextStyle(
+                              fontSize: 20.0,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            '설정 후 자녀 앱과 연결됩니다',
+                            style: TextStyle(
+                              fontSize: 16.0,
+                              color: AppTheme.textLight,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
 
                       const SizedBox(height: 30),
@@ -719,7 +783,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                   const SizedBox(width: 12),
                                   const Expanded(
                                     child: Text(
-                                      '식사 기록 앱으로 하루 3번의 식사를 기록할 수 있습니다',
+                                      '식사하셨어요? 앱으로 하루 3번의 식사를 기록할 수 있습니다. ',
                                       style: TextStyle(
                                         fontSize: 14,
                                         color: AppTheme.textMedium,
@@ -748,7 +812,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
 
                             // Survival signal toggle
                             _buildToggleOption(
-                              title: '생존 신호 감지',
+                              title: '안전 알림 서비스',
                               subtitle: '휴대폰 사용 여부를 자녀에게 알림',
                               value: _survivalSignalEnabled,
                               onChanged: (value) {
@@ -857,7 +921,9 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                             gradient: AppTheme.primaryGradient,
                             boxShadow: [
                               BoxShadow(
-                                color: AppTheme.primaryGreen.withValues(alpha: 0.3),
+                                color: AppTheme.primaryGreen.withValues(
+                                  alpha: 0.3,
+                                ),
                                 blurRadius: 10,
                                 offset: const Offset(0, 5),
                               ),

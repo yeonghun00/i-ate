@@ -7,12 +7,25 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:35493200393:android:8508eafd343b73a88f2ed8",
+        "mobilesdk_app_id": "1:35493200393:android:bb360bae31b9220a8f2ed8",
         "android_client_info": {
-          "package_name": "com.thousandemfla.thanks_everyday.elder"
+          "package_name": "com.thousandemfla.love_everyday"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "35493200393-8busrqc0sjm9ajm4e748oqhc94ksrce3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.thousandemfla.love_everyday",
+            "certificate_hash": "83cfffb5e02f0de5e89a92dea754ba456488794f"
+          }
+        },
+        {
+          "client_id": "35493200393-8ukmoeoj3hidp1s79ll4qldad2stbp07.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyALzSCpgK2e0u2nBUXbLMPcw0BG6UwRhY0"
@@ -20,7 +33,49 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "35493200393-8ukmoeoj3hidp1s79ll4qldad2stbp07.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:35493200393:android:8508eafd343b73a88f2ed8",
+        "android_client_info": {
+          "package_name": "com.thousandemfla.thanks_everyday"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "35493200393-eui9v0h7hcuhnhmv5p643nm2ek76896m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.thousandemfla.thanks_everyday",
+            "certificate_hash": "83cfffb5e02f0de5e89a92dea754ba456488794f"
+          }
+        },
+        {
+          "client_id": "35493200393-8ukmoeoj3hidp1s79ll4qldad2stbp07.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALzSCpgK2e0u2nBUXbLMPcw0BG6UwRhY0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "35493200393-8ukmoeoj3hidp1s79ll4qldad2stbp07.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -5,8 +5,8 @@ import 'package:thanks_everyday/services/food_tracking_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
-import 'package:thanks_everyday/services/survival_signal_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
+import 'package:thanks_everyday/services/smart_usage_detector.dart';
 import 'package:thanks_everyday/services/overlay_service.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
@@ -24,20 +24,23 @@ void main() async {
     print('Firebase initialized successfully');
   } catch (e) {
     print('Firebase initialization failed: $e');
+    // Don't continue if Firebase fails - this will cause issues throughout the app
+    throw Exception('Firebase initialization failed: $e');
   }
 
-  try {
-    await SurvivalSignalService.initialize();
-    print('SurvivalSignalService initialized successfully');
-  } catch (e) {
-    print('SurvivalSignalService initialization failed: $e');
-  }
 
   try {
     await ScreenMonitorService.initialize();
     print('ScreenMonitorService initialized successfully');
   } catch (e) {
     print('ScreenMonitorService initialization failed: $e');
+  }
+
+  try {
+    await SmartUsageDetector.instance.initialize();
+    print('SmartUsageDetector initialized successfully');
+  } catch (e) {
+    print('SmartUsageDetector initialization failed: $e');
   }
 
   try {
@@ -56,7 +59,7 @@ class ThanksEverydayApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '식사 기록',
+      title: '식사하셨어요?',
       theme: AppTheme.appTheme,
       home: const AppWrapper(),
       debugShowCheckedModeBanner: false,
@@ -94,8 +97,15 @@ class _AppWrapperState extends State<AppWrapper> {
         'Firebase setup: $isSetup, SharedPreferences setup: $setupComplete',
       );
 
+      // Be more lenient - if either Firebase OR SharedPreferences indicates setup is complete
+      final actuallySetup = isSetup || setupComplete;
+      
+      print('  - Firebase service setup: $isSetup');
+      print('  - SharedPreferences setup_complete: $setupComplete');
+      print('  - Final decision: $actuallySetup');
+      
       setState(() {
-        _isSetup = isSetup || setupComplete;
+        _isSetup = actuallySetup;
         _isLoading = false;
       });
     } catch (e) {
@@ -107,15 +117,67 @@ class _AppWrapperState extends State<AppWrapper> {
   }
 
   void _onSetupComplete() async {
-    print('_onSetupComplete called, navigating to main page');
+    print('🎉 _onSetupComplete called, navigating to main page');
 
     // Store completion state in SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('setup_complete', true);
-      print('Setup completion stored in SharedPreferences');
+      // Set default alert threshold
+      await prefs.setInt('alert_hours', 12); // Default 12 hours
+      
+      // Update Firebase alert threshold
+      try {
+        await _firebaseService.updateAlertSettings(alertMinutes: 12 * 60); // 12 hours in minutes
+      } catch (e) {
+        print('Failed to update Firebase alert settings: $e');
+      }
+      
+      
+      // Initialize services based on user settings from initial setup
+      await _initializeServicesAfterSetup();
+      
     } catch (e) {
       print('Failed to store setup completion: $e');
+    }
+  }
+  
+  Future<void> _initializeServicesAfterSetup() async {
+    try {
+      await ScreenMonitorService.initialize();
+      await LocationService.initialize();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
+      final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
+      
+      print('🔧 Initializing services after setup completion:');
+      print('  - Survival signal: $survivalEnabled');
+      print('  - Location tracking: $locationEnabled');
+      
+      if (survivalEnabled) {
+        await ScreenMonitorService.enableSurvivalSignal();
+        print('✅ Survival signal monitoring enabled');
+        
+        // Survival signal monitoring enabled - native service will handle background updates
+        print('✅ Survival signal monitoring enabled after setup');
+      }
+      
+      if (locationEnabled) {
+        await LocationService.setLocationTrackingEnabled(true);
+        print('✅ Location tracking enabled');
+        
+        // Force immediate location update after setup
+        print('📍 Getting initial location after setup...');
+        final position = await LocationService.getCurrentLocation();
+        if (position != null) {
+          print('✅ Initial location obtained: ${position.latitude}, ${position.longitude}');
+        } else {
+          print('❌ Failed to get initial location');
+        }
+      }
+    } catch (e) {
+      print('❌ Failed to initialize services after setup: $e');
     }
 
     // Use a more robust approach to ensure state update happens
@@ -194,9 +256,18 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _loadTodayMealCount();
     _loadMealData();
-    _updateSurvivalSignal();
-    _startScreenActivityTracking();
     _initializeServices();
+    _updateActivityInFirebase();
+  }
+
+  Future<void> _updateActivityInFirebase() async {
+    try {
+      // Update phone activity to Firebase immediately when app becomes active
+      await _firebaseService.updatePhoneActivity();
+      print('App is active - phone activity updated in Firebase');
+    } catch (e) {
+      print('Failed to update phone activity: $e');
+    }
   }
 
   Future<void> _loadTodayMealCount() async {
@@ -222,10 +293,99 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _initializeServices() async {
     try {
+      print('🔧 Starting service initialization...');
+      
+      // Debug: Check what's actually happening
+      final prefs = await SharedPreferences.getInstance();
+      final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
+      final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
+      
+      print('🔍 DEBUG Settings:');
+      print('  - survival_signal_enabled: $survivalEnabled');
+      print('  - location_tracking_enabled: $locationEnabled');
+      
+      print('🔧 Initializing ScreenMonitorService...');
+      await ScreenMonitorService.initialize();
+      print('✅ ScreenMonitorService.initialize() completed');
+      
       await LocationService.initialize();
       await FoodTrackingService.initialize();
+      
+      if (survivalEnabled) {
+        print('🔧 Enabling survival signal...');
+        await ScreenMonitorService.enableSurvivalSignal();
+        print('✅ Survival signal enabled');
+        
+        // EXPLICITLY start WorkManager for background updates
+        print('🔄 Starting WorkManager for background updates...');
+        await ScreenMonitorService.startMonitoring(); // This schedules WorkManager
+        print('✅ WorkManager scheduled for 15-minute updates');
+        
+        // Native service will handle background Firebase updates
+        print('✅ Background phone activity monitoring started');
+      } else {
+        print('❌ Survival signal is disabled in preferences');
+      }
+      
+      if (locationEnabled) {
+        await LocationService.setLocationTrackingEnabled(true);
+        print('✅ Location tracking started');
+        
+        // Force immediate location update
+        print('📍 Getting immediate location...');
+        final position = await LocationService.getCurrentLocation();
+        if (position != null) {
+          print('✅ Location updated: ${position.latitude}, ${position.longitude}');
+        } else {
+          print('❌ Failed to get location');
+        }
+      }
     } catch (e) {
-      print('서비스 초기화 실패: $e');
+      print('❌ Service initialization failed: $e');
+    }
+  }
+  
+  Future<void> _debugPermissions() async {
+    print('🔍 Checking permissions...');
+    
+    try {
+      final hasPermissions = await ScreenMonitorService.checkPermissions();
+      final hasUsageStats = await ScreenMonitorService.checkUsageStatsPermission();
+      final hasBattery = await ScreenMonitorService.checkBatteryOptimization();
+      
+      print('  - All permissions: $hasPermissions');
+      print('  - Usage stats: $hasUsageStats');
+      print('  - Battery optimization: $hasBattery');
+    } catch (e) {
+      print('❌ Permission check failed: $e');
+    }
+  }
+  
+  Future<void> _manualServiceTest() async {
+    print('🚨 MANUAL SERVICE START TEST');
+    try {
+      print('Step 1: Initialize ScreenMonitorService');
+      await ScreenMonitorService.initialize();
+      print('✅ ScreenMonitorService initialized');
+      
+      print('Step 2: Check permissions');
+      final hasPermissions = await ScreenMonitorService.checkPermissions();
+      print('Permissions granted: $hasPermissions');
+      
+      if (!hasPermissions) {
+        print('Step 3: Request permissions');
+        await ScreenMonitorService.requestPermissions();
+      }
+      
+      print('Step 4: Enable survival signal');
+      await ScreenMonitorService.enableSurvivalSignal();
+      print('✅ Manual service start completed');
+      
+      print('Step 5: Background monitoring is now active');
+      print('✅ Manual service start completed');
+      
+    } catch (e) {
+      print('❌ Manual service start failed: $e');
     }
   }
 
@@ -294,28 +454,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _updateSurvivalSignal() async {
-    try {
-      await SurvivalSignalService.updateLastActivity();
-      await SurvivalSignalService.clearSurvivalAlert();
-    } catch (e) {
-      print('Failed to update survival signal: $e');
-    }
-  }
 
-  Future<void> _startScreenActivityTracking() async {
-    // Track screen activity whenever the app is used
-    await SurvivalSignalService.updateLastActivity();
-
-    // Set up a timer to track activity every 15 minutes when app is active
-    Timer.periodic(const Duration(minutes: 15), (timer) async {
-      if (mounted) {
-        await SurvivalSignalService.updateLastActivity();
-      } else {
-        timer.cancel();
-      }
-    });
-  }
 
   @override
   void dispose() {
@@ -378,6 +517,7 @@ class _HomePageState extends State<HomePage> {
                       _buildHeader(),
 
                       const SizedBox(height: 20),
+
 
                       // Main content based on state
                       Expanded(
@@ -502,27 +642,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '가족들이 당신의 식사 상황을\n확인할 수 있어서 안심할 거예요',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: AppTheme.textLight,
-                      fontWeight: FontWeight.w500,
-                      height: 1.5,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '내일 또 만나요! 😊',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: AppTheme.progressColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
                 ],
               ),
             ),
@@ -536,15 +655,22 @@ class _HomePageState extends State<HomePage> {
   Widget _buildHeader() {
     return Column(
       children: [
-        // App title
-        const Text(
-          '식사 기록',
-          style: TextStyle(
-            fontSize: 32.0,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1F2937),
-            letterSpacing: 0.5,
-          ),
+        // App logo and title
+        Column(
+          children: [
+            // App logo
+            const SizedBox(height: 16),
+            // App title
+            const Text(
+              '식사하셨어요?',
+              style: TextStyle(
+                fontSize: 32.0,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textPrimary,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
         ),
 
         const SizedBox(height: 16),
@@ -554,9 +680,9 @@ class _HomePageState extends State<HomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(3, (index) {
             return Container(
-              width: 16,
-              height: 16,
-              margin: const EdgeInsets.symmetric(horizontal: 6),
+              width: 24,
+              height: 24,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: index < _todayMealCount
@@ -564,23 +690,12 @@ class _HomePageState extends State<HomePage> {
                     : AppTheme.borderLight,
               ),
               child: index < _todayMealCount
-                  ? const Icon(Icons.check, size: 10, color: Colors.white)
+                  ? const Icon(Icons.check, size: 16, color: Colors.white)
                   : null,
             );
           }),
         ),
 
-        const SizedBox(height: 8),
-
-        // Progress text
-        Text(
-          '$_todayMealCount개 완료 / 3개',
-          style: const TextStyle(
-            fontSize: 16,
-            color: AppTheme.textLight,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
       ],
     );
   }
@@ -622,18 +737,6 @@ class _HomePageState extends State<HomePage> {
               textAlign: TextAlign.center,
             ),
 
-            const SizedBox(height: 8),
-
-            // Subtitle
-            Text(
-              '하루 3번까지 기록할 수 있어요',
-              style: const TextStyle(
-                fontSize: 16,
-                color: AppTheme.textLight,
-                fontWeight: FontWeight.w500,
-              ),
-              textAlign: TextAlign.center,
-            ),
 
             const SizedBox(height: 32),
 
@@ -657,18 +760,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  if (_lastMealTime != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      '마지막 식사: ${FoodTrackingService.formatTimeSinceLastIntake(_lastMealTime)}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: AppTheme.darkGreen,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -746,6 +837,42 @@ class _HomePageState extends State<HomePage> {
               ),
               textAlign: TextAlign.center,
             ),
+            
+            const SizedBox(height: 20),
+            
+            // Simple service status check button for debugging
+            ElevatedButton(
+              onPressed: () async {
+                print('📊 📊 SERVICE STATUS CHECK 📊 📊');
+                
+                final prefs = await SharedPreferences.getInstance();
+                final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
+                final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
+                
+                print('Settings:');
+                print('  - Survival signal: $survivalEnabled');
+                print('  - Location tracking: $locationEnabled');
+                
+                if (survivalEnabled) {
+                  print('🔧 Screen monitoring service is active');
+                  print('  - Native service handles background updates automatically');
+                }
+                
+                if (locationEnabled) {
+                  print('📍 Testing location service...');
+                  final position = await LocationService.getCurrentLocation();
+                  if (position != null) {
+                    print('  - Location service responded: ${position.latitude}, ${position.longitude}');
+                  } else {
+                    print('  - Location service NOT responding');
+                  }
+                }
+                
+                print('📊 Service check completed - close app and check Firebase in 15 minutes');
+              },
+              child: const Text('Test Services'),
+            ),
+            
           ],
         ),
       ),

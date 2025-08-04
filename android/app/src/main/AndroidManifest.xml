@@ -10,9 +10,26 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    
+    <!-- Features for better location support -->
+    <uses-feature 
+        android:name="android.hardware.location" 
+        android:required="false" />
+    <uses-feature 
+        android:name="android.hardware.location.gps" 
+        android:required="false" />
+    <uses-feature 
+        android:name="android.hardware.location.network" 
+        android:required="false" />
+    
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application
-        android:label="고마워요"
+        android:label="식사하셨어요?"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -38,24 +55,47 @@
             </intent-filter>
         </activity>
         
-        <!-- Screen monitoring service -->
-        <service 
-            android:name=".ScreenMonitorService"
-            android:enabled="true"
-            android:exported="false" />
-        
         <!-- Boot receiver to restart monitoring -->
         <receiver 
-            android:name=".BootReceiver"
+            android:name=".elder.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android:intent.action.PACKAGE_REPLACED" />
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
+        
+        <!-- AlarmManager receiver for 2-minute location updates -->
+        <receiver 
+            android:name=".elder.AlarmUpdateReceiver"
+            android:enabled="true"
+            android:exported="false">
+        </receiver>
+        
+        <!-- Screen state receiver for immediate unlock detection -->
+        <receiver 
+            android:name=".elder.ScreenStateReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.SCREEN_ON" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+        </receiver>
+        
+        <!-- Foreground service for persistent screen monitoring -->
+        <service 
+            android:name=".elder.ScreenMonitorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property 
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="explanation" />
+        </service>
         
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

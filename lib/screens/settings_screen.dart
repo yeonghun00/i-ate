@@ -41,10 +41,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _familyCode = _firebaseService.familyCode;
         _elderlyName = _firebaseService.elderlyName;
-        _survivalSignalEnabled = prefs.getBool('survival_signal_enabled') ?? false;
+        _survivalSignalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
         _alertHours = prefs.getInt('alert_hours') ?? 12;
         _familyContact = prefs.getString('family_contact');
-        _locationTrackingEnabled = prefs.getBool('location_tracking_enabled') ?? false;
+        _locationTrackingEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
       });
     } catch (e) {
@@ -143,7 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Update local settings first
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('survival_signal_enabled', _survivalSignalEnabled);
+      await prefs.setBool('flutter.survival_signal_enabled', _survivalSignalEnabled);
       await prefs.setInt('alert_hours', _alertHours);
       print('Local settings updated successfully');
       
@@ -194,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _updateLocationSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('location_tracking_enabled', _locationTrackingEnabled);
+      await prefs.setBool('flutter.location_tracking_enabled', _locationTrackingEnabled);
       
       // Update location service
       await LocationService.setLocationTrackingEnabled(_locationTrackingEnabled);
@@ -278,7 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _buildToggleItem(
                     icon: Icons.health_and_safety,
-                    title: '생존 신호 감지',
+                    title: '안전 알림 서비스',
                     subtitle: '휴대폰 사용 여부를 자녀에게 알려서 안전 확인',
                     value: _survivalSignalEnabled,
                     onChanged: (value) {

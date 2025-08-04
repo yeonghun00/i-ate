@@ -81,6 +81,19 @@ class AppTheme {
   static const Color successGreen = primaryGreen;
 
   // ==========================================================================
+  // SURVIVAL SIGNAL COLORS
+  // ==========================================================================
+
+  /// Survival signal safe color - green
+  static const Color survivalSafe = Color(0xFF10B981);
+
+  /// Survival signal warning color - yellow/amber
+  static const Color survivalWarning = Color(0xFFF59E0B);
+
+  /// Survival signal alert color - red
+  static const Color survivalAlert = Color(0xFFEF4444);
+
+  // ==========================================================================
   // GRADIENTS - For Visual Appeal
   // ==========================================================================
 
@@ -148,10 +161,33 @@ class AppTheme {
     }
   }
 
+  /// Get survival signal color based on hours since last activity and alert threshold
+  /// Returns: GREEN (safe), YELLOW (warning - 1 hour before limit), RED (alert - at/over limit)
+  static Color getSurvivalSignalColor(int hoursSinceActivity, int alertThresholdHours) {
+    if (hoursSinceActivity >= alertThresholdHours) {
+      return survivalAlert; // RED - Alert triggered
+    } else if (hoursSinceActivity >= (alertThresholdHours - 1)) {
+      return survivalWarning; // YELLOW - Warning (1 hour before limit)
+    } else {
+      return survivalSafe; // GREEN - Safe
+    }
+  }
+
+  /// Get survival signal status text
+  static String getSurvivalSignalStatus(int hoursSinceActivity, int alertThresholdHours) {
+    if (hoursSinceActivity >= alertThresholdHours) {
+      return '알림 발생';
+    } else if (hoursSinceActivity >= (alertThresholdHours - 1)) {
+      return '주의 필요';
+    } else {
+      return '정상';
+    }
+  }
+
   /// Create shadow with primary color
   static List<BoxShadow> get primaryShadow => [
     BoxShadow(
-      color: primaryGreen.withOpacity(0.3),
+      color: primaryGreen.withValues(alpha: 0.3),
       blurRadius: 8,
       offset: const Offset(0, 4),
     ),
@@ -160,7 +196,7 @@ class AppTheme {
   /// Create soft shadow for cards
   static List<BoxShadow> get cardShadow => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.08),
+      color: Colors.black.withValues(alpha: 0.08),
       blurRadius: 20,
       offset: const Offset(0, 8),
     ),
@@ -169,7 +205,7 @@ class AppTheme {
   /// Create subtle shadow for buttons
   static List<BoxShadow> get buttonShadow => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.1),
+      color: Colors.black.withValues(alpha: 0.1),
       blurRadius: 4,
       offset: const Offset(0, 2),
     ),
@@ -196,12 +232,10 @@ class AppTheme {
         secondary: accentBlue,
         tertiary: accentPurple,
         error: errorRed,
-        background: backgroundLight,
         surface: backgroundWhite,
         onPrimary: textWhite,
         onSecondary: textWhite,
         onSurface: textPrimary,
-        onBackground: textPrimary,
       ),
 
       // App bar theme
@@ -233,7 +267,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: backgroundWhite,
         elevation: 4,
-        shadowColor: Colors.black.withOpacity(0.1),
+        shadowColor: Colors.black.withValues(alpha: 0.1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
 

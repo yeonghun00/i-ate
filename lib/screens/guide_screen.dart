@@ -19,7 +19,7 @@ class _GuideScreenState extends State<GuideScreen> {
   final List<GuideStep> _steps = [
     GuideStep(
       title: '환영합니다!',
-      description: '식사 기록 앱 사용법을\n간단히 알려드릴게요',
+      description: '식사하셨어요? 앱 사용법을\n간단히 알려드릴게요',
       icon: Icons.waving_hand,
       color: AppTheme.primaryGreen,
     ),
@@ -55,7 +55,7 @@ class _GuideScreenState extends State<GuideScreen> {
     ),
     GuideStep(
       title: '시작할 준비 완료!',
-      description: '이제 오늘 좋았던 일을\n말씀해주세요',
+      description: '이제 식사를 기록하고\n건강을 관리해보세요',
       icon: Icons.celebration,
       color: AppTheme.accentOrange,
     ),

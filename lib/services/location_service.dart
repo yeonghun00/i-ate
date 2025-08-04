@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,6 +9,7 @@ import 'dart:async';
 class LocationService {
   static const String _locationEnabledKey = 'location_tracking_enabled';
   static const String _lastLocationKey = 'last_location';
+  static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
   
   static final FirebaseService _firebaseService = FirebaseService();
   static Timer? _locationTimer;
@@ -15,8 +17,21 @@ class LocationService {
   
   // Initialize location service
   static Future<void> initialize() async {
+    // Set up method call handler for native location updates
+    _channel.setMethodCallHandler((MethodCall call) async {
+      try {
+        switch (call.method) {
+          case 'onLocationUpdate':
+            await _handleLocationUpdate(call.arguments);
+            break;
+        }
+      } catch (e) {
+        print('Error handling location method call: $e');
+      }
+    });
+    
     if (await isLocationTrackingEnabled()) {
-      await _startLocationTracking();
+      await _startNativeLocationTracking();
     }
     print('Location service initialized');
   }
@@ -33,9 +48,21 @@ class LocationService {
     await prefs.setBool(_locationEnabledKey, enabled);
     
     if (enabled) {
-      await _startLocationTracking();
+      // Reset throttle for immediate first update
+      await _resetLocationThrottle();
+      await _startNativeLocationTracking();
     } else {
-      await _stopLocationTracking();
+      await _stopNativeLocationTracking();
+    }
+  }
+  
+  // Reset location update throttle
+  static Future<void> _resetLocationThrottle() async {
+    try {
+      await _channel.invokeMethod('resetThrottleTimer');
+      print('✅ Location throttle reset - next update will be immediate');
+    } catch (e) {
+      print('❌ Failed to reset location throttle: $e');
     }
   }
   
@@ -102,34 +129,29 @@ class LocationService {
     }
   }
   
-  // Start location tracking
-  static Future<void> _startLocationTracking() async {
+  // Start native location tracking (survives app kills)
+  static Future<void> _startNativeLocationTracking() async {
     if (!await checkLocationPermission()) {
       print('Location permission not granted');
       return;
     }
     
-    // Check background permissions for continuous tracking (optional)
-    if (!await checkBackgroundLocationPermission()) {
-      print('Battery optimization not granted - tracking may be limited in background');
+    try {
+      await _channel.invokeMethod('startLocationTracking');
+      print('✅ Native location tracking started - survives app kills');
+    } on PlatformException catch (e) {
+      print('❌ Failed to start native location tracking: ${e.message}');
     }
-    
-    // Get initial location
-    await getCurrentLocation();
-    
-    // Start periodic location updates (every 30 minutes for optimal battery/cost balance)
-    _locationTimer = Timer.periodic(const Duration(minutes: 30), (timer) async {
-      await getCurrentLocation();
-    });
-    
-    print('Location tracking started - updates every 30 minutes');
   }
   
-  // Stop location tracking
-  static Future<void> _stopLocationTracking() async {
-    _locationTimer?.cancel();
-    _locationTimer = null;
-    print('Location tracking stopped');
+  // Stop native location tracking
+  static Future<void> _stopNativeLocationTracking() async {
+    try {
+      await _channel.invokeMethod('stopLocationMonitoring');
+      print('✅ Native location tracking stopped');
+    } on PlatformException catch (e) {
+      print('❌ Failed to stop native location tracking: ${e.message}');
+    }
   }
   
   // Update location in Firebase
@@ -152,6 +174,38 @@ class LocationService {
     return _lastKnownPosition;
   }
 
+  // Handle native location updates
+  static Future<void> _handleLocationUpdate(dynamic args) async {
+    try {
+      final latitude = args['latitude'] as double;
+      final longitude = args['longitude'] as double;
+      final timestamp = args['timestamp'] as int;
+      final accuracy = args['accuracy'] as double;
+      
+      print('📍 Native location update: $latitude, $longitude (accuracy: ${accuracy}m)');
+      
+      // Create Position object
+      _lastKnownPosition = Position(
+        latitude: latitude,
+        longitude: longitude,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(timestamp),
+        accuracy: accuracy,
+        altitude: 0.0,
+        heading: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+        altitudeAccuracy: 0.0,
+        headingAccuracy: 0.0,
+      );
+      
+      // Update Firebase
+      await _updateLocationInFirebase(_lastKnownPosition!);
+      
+    } catch (e) {
+      print('❌ Failed to handle native location update: $e');
+    }
+  }
+  
   // Get location tracking status info
   static Future<Map<String, dynamic>> getLocationTrackingStatus() async {
     final isEnabled = await isLocationTrackingEnabled();
@@ -163,7 +217,7 @@ class LocationService {
       'locationPermission': hasLocationPermission,
       'batteryOptimization': hasBatteryOptimization,
       'lastLocation': _lastKnownPosition,
-      'isActivelyTracking': _locationTimer?.isActive ?? false,
+      'isActivelyTracking': true, // Native service is always active when enabled
     };
   }
   
@@ -180,5 +234,32 @@ class LocationService {
       pos2.latitude,
       pos2.longitude,
     );
+  }
+  
+  /// Test location service debugging
+  static Future<void> testLocationUpdate() async {
+    print('📍 📍 TESTING LOCATION SERVICE 📍 📍');
+    
+    try {
+      // Check if location is enabled
+      final isEnabled = await isLocationTrackingEnabled();
+      print('Location tracking enabled: $isEnabled');
+      
+      // Check permissions
+      final hasPermission = await checkLocationPermission();
+      print('Has location permission: $hasPermission');
+      
+      // Try to get current location manually
+      print('Attempting to get current location...');
+      final position = await getCurrentLocation();
+      if (position != null) {
+        print('✅ Got location: ${position.latitude}, ${position.longitude}');
+      } else {
+        print('❌ Failed to get location');
+      }
+      
+    } catch (e) {
+      print('❌ Location test failed: $e');
+    }
   }
 }

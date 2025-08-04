@@ -3,7 +3,6 @@ package com.thousandemfla.thanks_everyday.elder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 class BootReceiver : BroadcastReceiver() {
@@ -19,26 +18,34 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_PACKAGE_REPLACED -> {
                 
-                // Check if survival signal is enabled
+                // Check which services are enabled
                 val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val isEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+                val survivalSignalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+                val locationTrackingEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
                 
-                if (isEnabled) {
-                    Log.d(TAG, "Starting screen monitor service after boot")
-                    val serviceIntent = Intent(context, ScreenMonitorService::class.java)
-                    
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(serviceIntent)
-                        } else {
-                            context.startService(serviceIntent)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to start service: ${e.message}")
-                    }
+                Log.d(TAG, "📱 Boot settings: survivalSignal=$survivalSignalEnabled, locationTracking=$locationTrackingEnabled")
+                
+                // Use new smart scheduling - automatically schedules what's enabled
+                AlarmUpdateReceiver.scheduleAlarms(context)
+                
+                // Log what got started
+                if (locationTrackingEnabled && survivalSignalEnabled) {
+                    Log.d(TAG, "✅ Independent services started after boot:")
+                    Log.d(TAG, "  - GPS location tracking: ENABLED (separate alarm)")
+                    Log.d(TAG, "  - Survival signal monitoring: ENABLED (separate alarm)")
+                } else if (locationTrackingEnabled) {
+                    Log.d(TAG, "✅ GPS location tracking started after boot (independent)")
+                    Log.d(TAG, "  - Survival signal: DISABLED")
+                } else if (survivalSignalEnabled) {
+                    Log.d(TAG, "✅ Survival signal monitoring started after boot (independent)")
+                    Log.d(TAG, "  - GPS location: DISABLED")
                 } else {
-                    Log.d(TAG, "Survival signal disabled, not starting service")
+                    Log.d(TAG, "❌ Both services disabled, no alarms scheduled")
                 }
+                
+                // Log family info for debugging
+                val familyId = prefs.getString("flutter.family_id", null)
+                Log.d(TAG, "Family ID found: $familyId")
             }
         }
     }

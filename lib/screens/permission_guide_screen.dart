@@ -137,7 +137,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                 const SizedBox(height: 20),
                 
                 const Text(
-                  '식사 기록 앱이 제대로 작동하려면\n아래 권한이 필요합니다',
+                  '식사하셨어요? 앱이 제대로 작동하려면\n아래 권한이 필요합니다',
                   style: TextStyle(
                     fontSize: 18.0,
                     color: AppTheme.textLight,

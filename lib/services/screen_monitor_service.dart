@@ -1,9 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
+import 'package:thanks_everyday/services/smart_usage_detector.dart';
 
 class ScreenMonitorService {
-  static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday.elder/screen_monitor');
+  static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
   static final FirebaseService _firebaseService = FirebaseService();
   
   static Future<void> initialize() async {
@@ -14,6 +15,9 @@ class ScreenMonitorService {
           switch (call.method) {
             case 'onInactivityAlert':
               await _handleInactivityAlert();
+              break;
+            case 'onPhoneActivity':
+              await _handlePhoneActivity();
               break;
           }
         } catch (e) {
@@ -26,7 +30,7 @@ class ScreenMonitorService {
     }
   }
   
-  /// Start monitoring screen activity
+  /// Start monitoring screen activity (now uses SmartUsageDetector)
   static Future<bool> startMonitoring() async {
     try {
       // Check permissions first
@@ -36,8 +40,13 @@ class ScreenMonitorService {
         return false;
       }
       
+      // Use both legacy and new smart detection systems
       await _channel.invokeMethod('startScreenMonitoring');
-      print('Screen monitoring started');
+      
+      // Start smart usage detection for enhanced monitoring
+      await SmartUsageDetector.instance.initialize();
+      
+      print('Screen monitoring started (Legacy + Smart Detection)');
       return true;
     } on PlatformException catch (e) {
       print('Failed to start screen monitoring: ${e.message}');
@@ -49,7 +58,11 @@ class ScreenMonitorService {
   static Future<bool> stopMonitoring() async {
     try {
       await _channel.invokeMethod('stopScreenMonitoring');
-      print('Screen monitoring stopped');
+      
+      // Stop smart usage detection as well
+      await SmartUsageDetector.instance.stop();
+      
+      print('Screen monitoring stopped (Legacy + Smart Detection)');
       return true;
     } on PlatformException catch (e) {
       print('Failed to stop screen monitoring: ${e.message}');
@@ -171,7 +184,7 @@ class ScreenMonitorService {
   /// Enable survival signal monitoring
   static Future<void> enableSurvivalSignal() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('survival_signal_enabled', true);
+    await prefs.setBool('flutter.survival_signal_enabled', true);
     print('Survival signal enabled in preferences');
     
     // Check permissions before starting service
@@ -181,26 +194,28 @@ class ScreenMonitorService {
       return;
     }
     
+    // Native service will handle timing and throttling internally
+    
     // Start monitoring
     final started = await startMonitoring();
     if (started) {
-      print('Survival signal monitoring enabled successfully');
+      print('Native screen monitoring enabled successfully');
       print('- Background service: Started');
       print('- WorkManager: Scheduled for periodic checks');
-      print('- Screen events: Being monitored');
+      print('- Screen on/off events: Being monitored');
     } else {
-      print('Failed to start survival signal monitoring');
+      print('Failed to start screen monitoring');
     }
   }
   
   /// Disable survival signal monitoring
   static Future<void> disableSurvivalSignal() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('survival_signal_enabled', false);
+    await prefs.setBool('flutter.survival_signal_enabled', false);
     
     // Stop monitoring
     await stopMonitoring();
-    print('Survival signal monitoring disabled');
+    print('Native screen monitoring disabled');
   }
   
   /// Handle inactivity alert from native service
@@ -212,6 +227,16 @@ class ScreenMonitorService {
       await _sendSurvivalAlert();
     } catch (e) {
       print('Failed to send survival alert: $e');
+    }
+  }
+  
+  /// Handle phone activity from native service
+  static Future<void> _handlePhoneActivity() async {
+    try {
+      // Update Firebase with general phone activity
+      await _firebaseService.updatePhoneActivity();
+    } catch (e) {
+      print('Failed to update Firebase phone activity: $e');
     }
   }
   
