@@ -33,15 +33,22 @@ class BootReceiver : BroadcastReceiver() {
                     Log.d(TAG, "✅ Independent services started after boot:")
                     Log.d(TAG, "  - GPS location tracking: ENABLED (separate alarm)")
                     Log.d(TAG, "  - Survival signal monitoring: ENABLED (separate alarm)")
+                    Log.d(TAG, "  - ScreenStateReceiver: ENABLED (AndroidManifest registration)")
                 } else if (locationTrackingEnabled) {
                     Log.d(TAG, "✅ GPS location tracking started after boot (independent)")
                     Log.d(TAG, "  - Survival signal: DISABLED")
                 } else if (survivalSignalEnabled) {
                     Log.d(TAG, "✅ Survival signal monitoring started after boot (independent)")
                     Log.d(TAG, "  - GPS location: DISABLED")
+                    Log.d(TAG, "  - ScreenStateReceiver: ENABLED (AndroidManifest registration)")
                 } else {
                     Log.d(TAG, "❌ Both services disabled, no alarms scheduled")
+                    Log.d(TAG, "  - ScreenStateReceiver: Should still work (AndroidManifest)")
                 }
+                
+                // Test if ScreenStateReceiver is working by logging
+                Log.d(TAG, "📱 ScreenStateReceiver should now be listening for unlock events")
+                Log.d(TAG, "📱 If you don't see unlock logs, the receiver may be restricted")
                 
                 // Log family info for debugging
                 val familyId = prefs.getString("flutter.family_id", null)

@@ -89,23 +89,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             
-            val intervalMillis = 2 * 60 * 1000L // 2 minutes for testing
-            
-            // Check if we can schedule exact alarms (Android 12+)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                if (!alarmManager.canScheduleExactAlarms()) {
-                    Log.e(TAG, "❌ Cannot schedule exact alarms - using inexact alarms as fallback")
-                    // Use inexact alarm as fallback
-                    alarmManager.setInexactRepeating(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        SystemClock.elapsedRealtime() + intervalMillis,
-                        intervalMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "✅ Survival signal inexact alarm scheduled (fallback)")
-                    return
-                }
-            }
+            val intervalMillis = 2 * 60 * 1000L // 2 minutes
             val triggerAtMillis = SystemClock.elapsedRealtime() + intervalMillis
             
             Log.d(TAG, "📅 Scheduling survival alarm:")
@@ -113,20 +97,42 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             Log.d(TAG, "  - Trigger at (elapsed): $triggerAtMillis")
             Log.d(TAG, "  - Interval: ${intervalMillis / 1000} seconds")
             
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            // Use the most aggressive scheduling available for survival monitoring
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    // Android 12+ with exact alarm permission
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "  - Using: setExactAndAllowWhileIdle (Android 12+)")
+                } else {
+                    // Fallback: Use inexact but more reliable for survival monitoring
+                    Log.w(TAG, "❌ Exact alarms not permitted, using setAndAllowWhileIdle")
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "  - Using: setAndAllowWhileIdle (fallback)")
+                }
+            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                // Android 6-11: Use setExactAndAllowWhileIdle for doze mode bypass
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     triggerAtMillis,
                     pendingIntent
                 )
-                Log.d(TAG, "  - Using: setExactAndAllowWhileIdle")
+                Log.d(TAG, "  - Using: setExactAndAllowWhileIdle (Android 6-11)")
             } else {
+                // Android 5 and below
                 alarmManager.setExact(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     triggerAtMillis,
                     pendingIntent
                 )
-                Log.d(TAG, "  - Using: setExact")
+                Log.d(TAG, "  - Using: setExact (Android 5-)")
             }
             
             Log.d(TAG, "✅ Survival signal alarm scheduled successfully for ${intervalMillis / 1000 / 60} minutes interval")
@@ -330,45 +336,39 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
     }
     
     private fun handleSurvivalUpdate(context: Context) {
-        Log.d(TAG, "💓💓💓 SURVIVAL ALARM TRIGGERED - Starting survival signal update")
+        Log.d(TAG, "💓💓💓 SURVIVAL ALARM TRIGGERED - 2-minute check (like GPS)")
         
         // Check if survival signal is still enabled
-        val isEnabled = isSurvivalSignalEnabled(context)
-        Log.d(TAG, "🔍 Survival signal enabled check: $isEnabled")
-        
-        if (!isEnabled) {
+        if (!isSurvivalSignalEnabled(context)) {
             Log.d(TAG, "⚠️ Survival signal disabled, skipping update and NOT scheduling next alarm")
             return
         }
         
-        Log.d(TAG, "✅ Survival signal is enabled, proceeding with update")
+        Log.d(TAG, "✅ Survival signal enabled, proceeding with 2-minute check")
         
         try {
-            // Check screen state
+            // Check screen state (like GPS always runs)
             val isScreenOn = isScreenOn(context)
-            val screenState = if (isScreenOn) "on" else "off"
+            Log.d(TAG, "📱 2-minute check - Screen is: ${if (isScreenOn) "ON" else "OFF"}")
             
-            Log.d(TAG, "📱 Screen is currently: $screenState")
-            
-            // Always update Firebase - this shows current activity status
+            // Update Firebase ONLY if screen is ON
             if (isScreenOn) {
-                Log.d(TAG, "✅ Screen is ON - User is actively using phone")
-                updateFirebaseWithSurvivalStatus(context, "active", screenState)
+                Log.d(TAG, "✅ Screen ON - Updating Firebase")
+                updateFirebaseWithSurvivalStatus(context, "active")
             } else {
-                Log.d(TAG, "📱 Screen is OFF - User not currently active, keeping last activity time")
-                // Don't update lastPhoneActivity when screen is off - this preserves the timestamp
-                // of when user was last actually active
+                Log.d(TAG, "📱 Screen OFF - NOT updating Firebase (keeps last timestamp)")
             }
-            
-            // Schedule next survival signal alarm
-            Log.d(TAG, "🔄 Scheduling next survival signal alarm in 2 minutes...")
-            scheduleSurvivalAlarm(context)
-            Log.d(TAG, "✅ Next survival signal alarm scheduled successfully")
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in survival signal update: ${e.message}")
-            // Still schedule next update even if this one failed
+        }
+        
+        // ALWAYS schedule next alarm (like GPS) - runs every 2 minutes regardless
+        try {
             scheduleSurvivalAlarm(context)
+            Log.d(TAG, "🔄 Next 2-minute alarm scheduled")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ CRITICAL: Failed to schedule next 2-minute alarm: ${e.message}")
         }
     }
     
@@ -444,7 +444,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         }
     }
     
-    private fun updateFirebaseWithSurvivalStatus(context: Context, status: String, screenState: String) {
+    private fun updateFirebaseWithSurvivalStatus(context: Context, status: String) {
         // Get family ID
         val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val familyId = prefs.getString("flutter.family_id", null)

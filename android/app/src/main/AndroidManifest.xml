@@ -63,23 +63,25 @@
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android:intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
         
-        <!-- AlarmManager receiver for 2-minute location updates -->
+        <!-- CRITICAL FIX: AlarmManager receiver for 2-minute survival monitoring -->
         <receiver 
             android:name=".elder.AlarmUpdateReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="false"
+            android:directBootAware="true">
         </receiver>
         
-        <!-- Screen state receiver for immediate unlock detection -->
+        <!-- Screen state receiver for immediate unlock detection (works even when app killed) -->
         <receiver 
             android:name=".elder.ScreenStateReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="false"
+            android:directBootAware="true">
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.SCREEN_ON" />
                 <action android:name="android.intent.action.USER_PRESENT" />

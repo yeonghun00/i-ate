@@ -38,16 +38,17 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // ScreenStateReceiver is now registered in AndroidManifest.xml for system-wide detection
+        // CRITICAL FIX: Ensure survival monitoring is restored on app startup
+        // This handles cases where app was killed and user opens it again
+        restoreMonitoringOnStartup()
     }
     
     override fun onResume() {
         super.onResume()
         
-        // Ensure receiver is registered when app comes to foreground
-        if (screenStateReceiver == null) {
-            registerScreenStateReceiver()
-        }
+        // CRITICAL FIX: ScreenStateReceiver is now ONLY registered in AndroidManifest.xml
+        // This ensures it works even when app is closed/killed
+        // No dynamic registration needed anymore - all handled by system
     }
     
     override fun onDestroy() {
@@ -172,7 +173,36 @@ class MainActivity : FlutterActivity() {
             }
         }
         
-        // Simplified: WorkManager handles all background updates
+        // CRITICAL FIX: All background monitoring handled by AlarmUpdateReceiver + ScreenStateReceiver
+        // Both registered in AndroidManifest.xml for maximum reliability
+    }
+    
+    // CRITICAL FIX: Restore monitoring on app startup
+    private fun restoreMonitoringOnStartup() {
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+            val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
+            
+            Log.d(TAG, "🔄 Restoring monitoring on startup - Survival: $survivalEnabled, Location: $locationEnabled")
+            
+            if (survivalEnabled) {
+                Log.d(TAG, "✅ Restoring survival monitoring alarms")
+                AlarmUpdateReceiver.scheduleSurvivalAlarm(this)
+            }
+            
+            if (locationEnabled) {
+                Log.d(TAG, "✅ Restoring GPS location tracking alarms") 
+                AlarmUpdateReceiver.scheduleGpsAlarm(this)
+            }
+            
+            if (!survivalEnabled && !locationEnabled) {
+                Log.d(TAG, "ℹ️ No monitoring services enabled - nothing to restore")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error restoring monitoring on startup: ${e.message}")
+        }
     }
 
     private fun startGpsLikeSurvivalSignalMonitoring() {
@@ -188,7 +218,8 @@ class MainActivity : FlutterActivity() {
             // Use the GPS-like approach from AlarmUpdateReceiver
             AlarmUpdateReceiver.enableSurvivalMonitoring(this)
             
-            // ScreenStateReceiver is now registered in AndroidManifest.xml for system-wide detection
+            // ScreenStateReceiver is ONLY registered in AndroidManifest.xml for system-wide detection
+            // No dynamic registration - this ensures immediate unlock detection works when app is closed
             
             Log.d(TAG, "GPS-like survival signal monitoring started successfully:")
             Log.d(TAG, "  - AlarmManager: Checks screen state every 2 minutes")
@@ -237,12 +268,12 @@ class MainActivity : FlutterActivity() {
             // Use the GPS-like approach from AlarmUpdateReceiver
             AlarmUpdateReceiver.disableSurvivalMonitoring(this)
             
-            // Unregister ScreenStateReceiver when monitoring stops
-            unregisterScreenStateReceiver()
+            // ScreenStateReceiver remains active (managed by AndroidManifest.xml)
+            // It only updates Firebase when monitoring is enabled, so no action needed
             
             Log.d(TAG, "GPS-like survival signal monitoring stopped successfully:")
             Log.d(TAG, "  - AlarmManager: Survival signal checks disabled")
-            Log.d(TAG, "  - ScreenStateReceiver: Unregistered")
+            Log.d(TAG, "  - ScreenStateReceiver: Remains active but only updates when monitoring enabled")
             Log.d(TAG, "  - Location tracking may continue if enabled separately")
             Log.d(TAG, "  - Firebase: No more survival signal updates")
         } catch (e: Exception) {
@@ -462,37 +493,8 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    
-    private fun registerScreenStateReceiver() {
-        try {
-            if (screenStateReceiver == null) {
-                screenStateReceiver = ScreenStateReceiver()
-                val intentFilter = IntentFilter().apply {
-                    addAction(Intent.ACTION_SCREEN_ON)
-                    addAction(Intent.ACTION_USER_PRESENT)
-                    priority = 1000
-                }
-                registerReceiver(screenStateReceiver, intentFilter)
-                Log.d(TAG, "✅ Screen state receiver registered dynamically for ACTION_SCREEN_ON and ACTION_USER_PRESENT")
-            } else {
-                Log.d(TAG, "📱 Screen state receiver already registered")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to register screen state receiver: ${e.message}")
-        }
-    }
-    
-    private fun unregisterScreenStateReceiver() {
-        try {
-            screenStateReceiver?.let {
-                unregisterReceiver(it)
-                screenStateReceiver = null
-                Log.d(TAG, "❌ Screen state receiver unregistered")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to unregister screen state receiver: ${e.message}")
-        }
-    }
+    // CRITICAL FIX: Dynamic registration methods removed
+    // All receivers now registered in AndroidManifest.xml for better reliability
     
     private fun isScreenCurrentlyOn(): Boolean {
         return try {

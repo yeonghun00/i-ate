@@ -15,13 +15,13 @@ class ScreenStateReceiver : BroadcastReceiver() {
     }
     
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "📱📱📱 SCREEN STATE CHANGE DETECTED: ${intent.action}")
+        Log.d(TAG, "🔔🔔🔔 SCREEN STATE RECEIVER TRIGGERED: ${intent.action}")
         
         when (intent.action) {
             Intent.ACTION_SCREEN_ON -> {
-                Log.d(TAG, "📱 Screen turned ON (but may still be locked)")
+                Log.d(TAG, "📱 Screen turned ON (but phone may still be locked)")
                 // Screen on doesn't mean user is active (could still be locked)
-                // We only update on USER_PRESENT for cost efficiency
+                // We only update on USER_PRESENT for accuracy
             }
             Intent.ACTION_USER_PRESENT -> {
                 Log.d(TAG, "🔓🔓🔓 USER UNLOCKED PHONE - IMMEDIATE FIREBASE UPDATE!")
