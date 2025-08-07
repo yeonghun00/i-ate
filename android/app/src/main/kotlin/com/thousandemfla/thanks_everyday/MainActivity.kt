@@ -21,6 +21,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.thousandemfla.thanks_everyday.elder.AlarmUpdateReceiver
 import com.thousandemfla.thanks_everyday.elder.ScreenStateReceiver
+import com.thousandemfla.thanks_everyday.elder.ScreenMonitorService
 import com.thousandemfla.thanks_everyday.elder.EnhancedUsageMonitor
 
 class MainActivity : FlutterActivity() {
@@ -189,6 +190,10 @@ class MainActivity : FlutterActivity() {
             if (survivalEnabled) {
                 Log.d(TAG, "✅ Restoring survival monitoring alarms")
                 AlarmUpdateReceiver.scheduleSurvivalAlarm(this)
+                
+                // CRITICAL FIX: Restart ScreenMonitorService for app persistence
+                Log.d(TAG, "✅ Restarting ScreenMonitorService for app persistence")
+                ScreenMonitorService.startService(this)
             }
             
             if (locationEnabled) {
@@ -218,13 +223,18 @@ class MainActivity : FlutterActivity() {
             // Use the GPS-like approach from AlarmUpdateReceiver
             AlarmUpdateReceiver.enableSurvivalMonitoring(this)
             
-            // ScreenStateReceiver is ONLY registered in AndroidManifest.xml for system-wide detection
+            // CRITICAL FIX: Start ScreenMonitorService for enhanced app persistence
+            // This foreground service helps prevent app termination and provides backup unlock detection
+            ScreenMonitorService.startService(this)
+            
+            // ScreenStateReceiver is now registered in AndroidManifest.xml for system-wide detection
             // No dynamic registration - this ensures immediate unlock detection works when app is closed
             
             Log.d(TAG, "GPS-like survival signal monitoring started successfully:")
             Log.d(TAG, "  - AlarmManager: Checks screen state every 2 minutes")
             Log.d(TAG, "  - PowerManager: Detects screen ON/OFF reliably")
-            Log.d(TAG, "  - ScreenStateReceiver: Detects immediate unlock (USER_PRESENT)")
+            Log.d(TAG, "  - ScreenStateReceiver: Detects immediate unlock (USER_PRESENT) from AndroidManifest.xml")
+            Log.d(TAG, "  - ScreenMonitorService: Foreground service provides backup detection & app persistence")
             Log.d(TAG, "  - Firebase: Updates 'lastPhoneActivity' field")
             Log.d(TAG, "  - Persistence: Works even when app is killed/phone reboots")
             
@@ -268,11 +278,15 @@ class MainActivity : FlutterActivity() {
             // Use the GPS-like approach from AlarmUpdateReceiver
             AlarmUpdateReceiver.disableSurvivalMonitoring(this)
             
+            // CRITICAL FIX: Stop ScreenMonitorService when disabling survival monitoring
+            ScreenMonitorService.stopService(this)
+            
             // ScreenStateReceiver remains active (managed by AndroidManifest.xml)
             // It only updates Firebase when monitoring is enabled, so no action needed
             
             Log.d(TAG, "GPS-like survival signal monitoring stopped successfully:")
             Log.d(TAG, "  - AlarmManager: Survival signal checks disabled")
+            Log.d(TAG, "  - ScreenMonitorService: Foreground service stopped")
             Log.d(TAG, "  - ScreenStateReceiver: Remains active but only updates when monitoring enabled")
             Log.d(TAG, "  - Location tracking may continue if enabled separately")
             Log.d(TAG, "  - Firebase: No more survival signal updates")

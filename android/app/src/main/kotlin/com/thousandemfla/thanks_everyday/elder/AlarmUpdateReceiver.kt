@@ -234,6 +234,11 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             prefs.edit().putBoolean("flutter.survival_signal_enabled", true).apply()
             Log.d(TAG, "✅ Saved flutter.survival_signal_enabled = true to SharedPreferences")
             
+            // Initialize screen state for unlock detection
+            val currentScreenState = isScreenOn(context)
+            setLastScreenState(context, currentScreenState)
+            Log.d(TAG, "🔄 Initialized screen state tracking - Current state: ${if (currentScreenState) "ON" else "OFF"}")
+            
             // Verify the setting was saved
             val verifyEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
             Log.d(TAG, "🔍 Verification: flutter.survival_signal_enabled = $verifyEnabled")
@@ -289,6 +294,17 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 Log.e(TAG, "Failed to check screen state: ${e.message}")
                 false
             }
+        }
+        
+        // Track last known screen state to detect unlock events
+        private fun getLastScreenState(context: Context): Boolean {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            return prefs.getBoolean("flutter.last_screen_state", false)
+        }
+        
+        private fun setLastScreenState(context: Context, isOn: Boolean) {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("flutter.last_screen_state", isOn).apply()
         }
     }
 
@@ -347,17 +363,26 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         Log.d(TAG, "✅ Survival signal enabled, proceeding with 2-minute check")
         
         try {
-            // Check screen state (like GPS always runs)
-            val isScreenOn = isScreenOn(context)
-            Log.d(TAG, "📱 2-minute check - Screen is: ${if (isScreenOn) "ON" else "OFF"}")
+            // Check current screen state
+            val isScreenCurrentlyOn = isScreenOn(context)
+            val wasScreenOn = getLastScreenState(context)
             
-            // Update Firebase ONLY if screen is ON
-            if (isScreenOn) {
-                Log.d(TAG, "✅ Screen ON - Updating Firebase")
+            Log.d(TAG, "📱 Screen state - Currently: ${if (isScreenCurrentlyOn) "ON" else "OFF"}, Previously: ${if (wasScreenOn) "ON" else "OFF"}")
+            
+            // Detect unlock event: screen went from OFF to ON
+            if (isScreenCurrentlyOn && !wasScreenOn) {
+                Log.d(TAG, "🔓🔓🔓 UNLOCK DETECTED - Screen went from OFF to ON!")
+                Log.d(TAG, "⚡ This simulates the immediate unlock detection that failed when app was killed")
+                updateFirebaseWithSurvivalStatus(context, "unlock_detected")
+            } else if (isScreenCurrentlyOn) {
+                Log.d(TAG, "✅ Screen ON (continued usage) - Updating Firebase")
                 updateFirebaseWithSurvivalStatus(context, "active")
             } else {
                 Log.d(TAG, "📱 Screen OFF - NOT updating Firebase (keeps last timestamp)")
             }
+            
+            // Update stored screen state for next check
+            setLastScreenState(context, isScreenCurrentlyOn)
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in survival signal update: ${e.message}")

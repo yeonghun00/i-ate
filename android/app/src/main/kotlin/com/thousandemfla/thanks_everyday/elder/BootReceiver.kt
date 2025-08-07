@@ -28,11 +28,18 @@ class BootReceiver : BroadcastReceiver() {
                 // Use new smart scheduling - automatically schedules what's enabled
                 AlarmUpdateReceiver.scheduleAlarms(context)
                 
+                // CRITICAL FIX: Restart ScreenMonitorService if survival monitoring is enabled
+                if (survivalSignalEnabled) {
+                    Log.d(TAG, "✅ Restarting ScreenMonitorService after boot for app persistence")
+                    ScreenMonitorService.startService(context)
+                }
+                
                 // Log what got started
                 if (locationTrackingEnabled && survivalSignalEnabled) {
                     Log.d(TAG, "✅ Independent services started after boot:")
                     Log.d(TAG, "  - GPS location tracking: ENABLED (separate alarm)")
                     Log.d(TAG, "  - Survival signal monitoring: ENABLED (separate alarm)")
+                    Log.d(TAG, "  - ScreenMonitorService: ENABLED (foreground service for persistence)")
                     Log.d(TAG, "  - ScreenStateReceiver: ENABLED (AndroidManifest registration)")
                 } else if (locationTrackingEnabled) {
                     Log.d(TAG, "✅ GPS location tracking started after boot (independent)")
@@ -40,6 +47,7 @@ class BootReceiver : BroadcastReceiver() {
                 } else if (survivalSignalEnabled) {
                     Log.d(TAG, "✅ Survival signal monitoring started after boot (independent)")
                     Log.d(TAG, "  - GPS location: DISABLED")
+                    Log.d(TAG, "  - ScreenMonitorService: ENABLED (foreground service for persistence)")
                     Log.d(TAG, "  - ScreenStateReceiver: ENABLED (AndroidManifest registration)")
                 } else {
                     Log.d(TAG, "❌ Both services disabled, no alarms scheduled")

@@ -55,6 +55,11 @@ class ScreenMonitorService : Service() {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
         
+        // Re-register receiver in case it was lost
+        registerScreenStateReceiver()
+        
+        Log.d(TAG, "✅ ScreenMonitorService running as foreground service for app persistence")
+        
         return START_STICKY // Restart if killed by system
     }
     
