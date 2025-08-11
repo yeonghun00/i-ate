@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/fcm_v1_service.dart';
 import 'dart:math';
+import 'dart:convert';
+import 'dart:typed_data';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
@@ -22,13 +24,27 @@ class FirebaseService {
       // Initialize FCM v1 service
       await FCMv1Service.initialize();
 
-      // Sign in anonymously for Firebase Auth
-      try {
-        if (_auth.currentUser == null) {
+      // Sign in anonymously for Firebase Auth with retry logic
+      int authRetryCount = 0;
+      const maxAuthRetries = 3;
+      
+      while (_auth.currentUser == null && authRetryCount < maxAuthRetries) {
+        try {
+          print('Attempting Firebase Auth (attempt ${authRetryCount + 1}/$maxAuthRetries)');
           await _auth.signInAnonymously();
+          print('Firebase Auth successful');
+          break;
+        } catch (authError) {
+          authRetryCount++;
+          print('Firebase Auth attempt $authRetryCount failed: $authError');
+          
+          if (authRetryCount < maxAuthRetries) {
+            await Future.delayed(Duration(milliseconds: 1000 * authRetryCount));
+          } else {
+            print('All Firebase Auth attempts failed, continuing without auth');
+            // This will cause Firestore operations to fail, but app won't crash
+          }
         }
-      } catch (authError) {
-        print('Firebase Auth failed, continuing without auth: $authError');
       }
 
       // Check if family code exists locally with retry logic
@@ -86,18 +102,35 @@ class FirebaseService {
     return code;
   }
 
-  // Generate a unique family ID
+  // Generate a cryptographically secure unique family ID using UUID v4
   String _generateFamilyId() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final random = Random().nextInt(99999);
-    return 'family_${timestamp}_$random';
+    // Generate a UUID v4 using cryptographically secure random bytes
+    final random = Random.secure();
+    
+    // Generate 16 random bytes for UUID
+    final bytes = Uint8List(16);
+    for (int i = 0; i < 16; i++) {
+      bytes[i] = random.nextInt(256);
+    }
+    
+    // Set version (4) and variant bits according to RFC 4122
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant bits
+    
+    // Convert to UUID string format
+    final hex = bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    final uuid = '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
+    
+    return 'family_$uuid';
   }
+
+  // Recovery code generation removed - using name + connection code only
 
   // Set up family code (called by family member)
   Future<String?> setupFamilyCode(String elderlyName) async {
     try {
       final connectionCode = await _generateConnectionCode();
-      final familyId = _generateFamilyId();
+      final familyId = await _generateUniqueFamilyId();
 
       final success = await _setupFamilyDocument(
         familyId,
@@ -112,6 +145,29 @@ class FirebaseService {
       print('Failed to setup family code: $e');
       return null;
     }
+  }
+  
+  // Generate a unique family ID with collision detection
+  Future<String> _generateUniqueFamilyId() async {
+    String familyId;
+    bool isUnique = false;
+    int attempts = 0;
+    const maxAttempts = 5;
+    
+    do {
+      familyId = _generateFamilyId();
+      
+      // Check if family ID already exists in Firestore
+      final docSnapshot = await _firestore.collection('families').doc(familyId).get();
+      isUnique = !docSnapshot.exists;
+      
+      attempts++;
+      if (attempts >= maxAttempts && !isUnique) {
+        throw Exception('Failed to generate unique family ID after $maxAttempts attempts');
+      }
+    } while (!isUnique);
+    
+    return familyId;
   }
 
   // Set up family document with unique ID and connection code
@@ -222,6 +278,18 @@ class FirebaseService {
       if (_familyCode == null || _familyId == null) {
         print('No family code or ID available');
         return false;
+      }
+
+      // Check authentication status before proceeding
+      if (_auth.currentUser == null) {
+        print('No authenticated user, attempting to re-authenticate');
+        try {
+          await _auth.signInAnonymously();
+          print('Re-authentication successful');
+        } catch (authError) {
+          print('Re-authentication failed: $authError');
+          return false;
+        }
       }
 
       // Get today's date string
@@ -767,9 +835,430 @@ class FirebaseService {
     }
   }
 
+  // Data Recovery Methods for App Reinstallation
+
+  // 8-digit recovery code method removed - use name + connection code instead
+
+  // NEW: Name + Connection Code Recovery System
+  
+  // Attempt to recover account using name and connection code
+  Future<Map<String, dynamic>?> recoverAccountWithNameAndCode({
+    required String name,
+    required String connectionCode,
+  }) async {
+    try {
+      print('Attempting account recovery with name: $name, connection code: $connectionCode');
+      
+      // First, get all families with the given connection code
+      final query = await _firestore
+          .collection('families')
+          .where('connectionCode', isEqualTo: connectionCode)
+          .get();
+
+      if (query.docs.isEmpty) {
+        print('No family found with connection code: $connectionCode');
+        return {
+          'success': false, 
+          'error': 'connection_code_not_found',
+          'message': '연결 코드를 찾을 수 없습니다. 코드를 다시 확인해주세요.'
+        };
+      }
+
+      // Check name matching with fuzzy logic
+      final candidates = <Map<String, dynamic>>[];
+      
+      for (final doc in query.docs) {
+        final data = doc.data();
+        final elderlyName = data['elderlyName'] as String? ?? '';
+        final familyId = doc.id;
+        
+        final matchScore = _calculateNameMatchScore(name, elderlyName);
+        
+        if (matchScore >= 0.7) { // 70% similarity threshold
+          candidates.add({
+            'familyId': familyId,
+            'data': data,
+            'matchScore': matchScore,
+            'elderlyName': elderlyName,
+          });
+        }
+      }
+
+      if (candidates.isEmpty) {
+        print('No name match found for: $name');
+        return {
+          'success': false,
+          'error': 'name_not_match',
+          'message': '이름이 일치하지 않습니다. 등록된 이름을 다시 확인해주세요.'
+        };
+      }
+
+      if (candidates.length > 1) {
+        // Multiple matches - return them for user to choose
+        print('Multiple name matches found: ${candidates.length}');
+        return {
+          'success': false,
+          'error': 'multiple_matches',
+          'message': '여러 개의 일치하는 계정이 발견되었습니다.',
+          'candidates': candidates.map((c) => {
+            'familyId': c['familyId'],
+            'elderlyName': c['elderlyName'],
+            'matchScore': c['matchScore'],
+          }).toList(),
+        };
+      }
+
+      // Single match found - proceed with recovery
+      final bestMatch = candidates.first;
+      final familyId = bestMatch['familyId'] as String;
+      final data = bestMatch['data'] as Map<String, dynamic>;
+      
+      // Restore local data
+      await _restoreLocalData(
+        familyId: familyId,
+        connectionCode: data['connectionCode'],
+        elderlyName: data['elderlyName'],
+        // recoveryCode removed - using name + connection code only
+      );
+      
+      print('Name + connection code recovery successful for: ${data['elderlyName']}');
+      return {
+        'success': true,
+        'familyId': familyId,
+        'connectionCode': data['connectionCode'],
+        'elderlyName': data['elderlyName'],
+        // recoveryCode field removed from recovery data
+        'mealCount': data['todayMealCount'] ?? 0,
+        'matchScore': bestMatch['matchScore'],
+      };
+    } catch (e) {
+      print('Name + connection code recovery failed: $e');
+      return {'success': false, 'error': 'recovery_failed', 'message': '복구 중 오류가 발생했습니다: $e'};
+    }
+  }
+  
+  // Fuzzy Korean name matching with various Korean name patterns
+  double _calculateNameMatchScore(String inputName, String storedName) {
+    if (inputName.isEmpty || storedName.isEmpty) return 0.0;
+    
+    // Normalize names (remove spaces and convert to lowercase)
+    final normalizedInput = inputName.replaceAll(' ', '').toLowerCase();
+    final normalizedStored = storedName.replaceAll(' ', '').toLowerCase();
+    
+    // Exact match
+    if (normalizedInput == normalizedStored) return 1.0;
+    
+    // Check if one contains the other (for cases like "김할머니" vs "김○○")
+    if (normalizedStored.contains(normalizedInput) || normalizedInput.contains(normalizedStored)) {
+      final minLength = [normalizedInput.length, normalizedStored.length].reduce((a, b) => a < b ? a : b);
+      final maxLength = [normalizedInput.length, normalizedStored.length].reduce((a, b) => a > b ? a : b);
+      return minLength / maxLength;
+    }
+    
+    // Korean name pattern matching
+    final koreanPatterns = [
+      // Handle cases like "김할머니" -> "김○○할머니", "김○○"
+      _handleKoreanSurnamePatterns(normalizedInput, normalizedStored),
+      // Handle honorific suffixes (할머니, 할아버지, 어머니, 아버지, etc.)
+      _handleHonorificPatterns(normalizedInput, normalizedStored),
+      // Handle middle character variations (김철수 vs 김○수)
+      _handleMiddleCharacterPatterns(normalizedInput, normalizedStored),
+    ];
+    
+    double maxScore = 0.0;
+    for (final score in koreanPatterns) {
+      if (score > maxScore) maxScore = score;
+    }
+    
+    // Fallback to Levenshtein distance for general similarity
+    if (maxScore < 0.5) {
+      maxScore = _calculateLevenshteinSimilarity(normalizedInput, normalizedStored);
+    }
+    
+    return maxScore;
+  }
+  
+  // Handle Korean surname patterns (김할머니 vs 김○○)
+  double _handleKoreanSurnamePatterns(String input, String stored) {
+    final koreanSurnamePattern = RegExp(r'^[가-힣]');
+    
+    if (!koreanSurnamePattern.hasMatch(input) || !koreanSurnamePattern.hasMatch(stored)) {
+      return 0.0;
+    }
+    
+    // Extract first character (surname)
+    final inputSurname = input.substring(0, 1);
+    final storedSurname = stored.substring(0, 1);
+    
+    if (inputSurname != storedSurname) return 0.0;
+    
+    // Handle patterns like "김○○" or "김**"
+    if (stored.contains('○') || stored.contains('*') || stored.contains('◯')) {
+      return 0.8; // High confidence for masked names
+    }
+    
+    if (input.contains('○') || input.contains('*') || input.contains('◯')) {
+      return 0.8;
+    }
+    
+    return 0.0;
+  }
+  
+  // Handle honorific patterns (할머니, 할아버지, etc.)
+  double _handleHonorificPatterns(String input, String stored) {
+    final honorifics = ['할머니', '할아버지', '어머니', '아버지', '엄마', '아빠', '부모님'];
+    
+    String inputBase = input;
+    String storedBase = stored;
+    bool foundHonorific = false;
+    
+    // Remove honorifics to get base names
+    for (final honorific in honorifics) {
+      if (input.endsWith(honorific)) {
+        inputBase = input.substring(0, input.length - honorific.length);
+        foundHonorific = true;
+      }
+      if (stored.endsWith(honorific)) {
+        storedBase = stored.substring(0, stored.length - honorific.length);
+        foundHonorific = true;
+      }
+    }
+    
+    if (!foundHonorific) return 0.0;
+    
+    // Compare base names
+    if (inputBase == storedBase) return 0.9;
+    if (inputBase.isNotEmpty && storedBase.isNotEmpty) {
+      return _calculateLevenshteinSimilarity(inputBase, storedBase) * 0.8;
+    }
+    
+    return 0.0;
+  }
+  
+  // Handle middle character variations (김철수 vs 김○수)
+  double _handleMiddleCharacterPatterns(String input, String stored) {
+    if (input.length != stored.length || input.length < 2) return 0.0;
+    
+    int matchCount = 0;
+    int totalChars = input.length;
+    
+    for (int i = 0; i < totalChars; i++) {
+      final inputChar = input[i];
+      final storedChar = stored[i];
+      
+      if (inputChar == storedChar) {
+        matchCount++;
+      } else if (storedChar == '○' || storedChar == '*' || storedChar == '◯' ||
+                inputChar == '○' || inputChar == '*' || inputChar == '◯') {
+        matchCount++; // Treat wildcards as matches
+      }
+    }
+    
+    return matchCount / totalChars;
+  }
+  
+  // Calculate Levenshtein distance similarity
+  double _calculateLevenshteinSimilarity(String s1, String s2) {
+    if (s1.isEmpty) return s2.isEmpty ? 1.0 : 0.0;
+    if (s2.isEmpty) return 0.0;
+    
+    final matrix = List.generate(
+      s1.length + 1,
+      (_) => List.filled(s2.length + 1, 0),
+    );
+    
+    // Initialize first row and column
+    for (int i = 0; i <= s1.length; i++) matrix[i][0] = i;
+    for (int j = 0; j <= s2.length; j++) matrix[0][j] = j;
+    
+    // Fill matrix
+    for (int i = 1; i <= s1.length; i++) {
+      for (int j = 1; j <= s2.length; j++) {
+        final cost = s1[i - 1] == s2[j - 1] ? 0 : 1;
+        matrix[i][j] = [
+          matrix[i - 1][j] + 1,      // deletion
+          matrix[i][j - 1] + 1,      // insertion
+          matrix[i - 1][j - 1] + cost, // substitution
+        ].reduce((a, b) => a < b ? a : b);
+      }
+    }
+    
+    final maxLength = [s1.length, s2.length].reduce((a, b) => a > b ? a : b);
+    return 1.0 - (matrix[s1.length][s2.length] / maxLength);
+  }
+  
+  // Auto-detect existing accounts by searching for potential matches
+  Future<List<Map<String, dynamic>>> autoDetectExistingAccounts() async {
+    try {
+      print('Starting auto-detection of existing accounts...');
+      
+      // Get all families to check for potential matches
+      // In a real scenario, you might want to limit this or use better indexing
+      final query = await _firestore
+          .collection('families')
+          .where('isActive', isEqualTo: true)
+          .limit(50) // Reasonable limit for auto-detection
+          .get();
+
+      if (query.docs.isEmpty) {
+        print('No active families found for auto-detection');
+        return [];
+      }
+
+      final candidates = <Map<String, dynamic>>[];
+      
+      // Look for families that might belong to this device
+      for (final doc in query.docs) {
+        final data = doc.data();
+        final familyId = doc.id;
+        
+        // Check various criteria for potential matches
+        final confidence = _calculateAutoDetectionConfidence(data);
+        
+        if (confidence >= 0.3) { // 30% confidence threshold for auto-detection
+          candidates.add({
+            'familyId': familyId,
+            'elderlyName': data['elderlyName'],
+            'connectionCode': data['connectionCode'],
+            'confidence': confidence,
+            'lastActivity': data['lastPhoneActivity'],
+            'mealCount': data['todayMealCount'] ?? 0,
+          });
+        }
+      }
+
+      // Sort by confidence score
+      candidates.sort((a, b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
+      
+      print('Auto-detection found ${candidates.length} potential matches');
+      return candidates.take(5).toList(); // Return top 5 candidates
+    } catch (e) {
+      print('Auto-detection failed: $e');
+      return [];
+    }
+  }
+  
+  // Calculate auto-detection confidence based on various factors
+  double _calculateAutoDetectionConfidence(Map<String, dynamic> data) {
+    double confidence = 0.0;
+    
+    // Check recent activity (higher confidence for recently active accounts)
+    final lastActivity = data['lastPhoneActivity'];
+    if (lastActivity != null) {
+      final lastActivityTime = lastActivity is Timestamp 
+          ? lastActivity.toDate() 
+          : DateTime.tryParse(lastActivity.toString());
+      
+      if (lastActivityTime != null) {
+        final daysSinceActivity = DateTime.now().difference(lastActivityTime).inDays;
+        if (daysSinceActivity <= 7) {
+          confidence += 0.5; // Recent activity within a week
+        } else if (daysSinceActivity <= 30) {
+          confidence += 0.3; // Activity within a month
+        }
+      }
+    }
+    
+    // Check if account has meal records (indicates active usage)
+    final mealCount = data['todayMealCount'] ?? 0;
+    if (mealCount > 0) {
+      confidence += 0.2;
+    }
+    
+    // Check if survival signal is enabled (indicates setup completion)
+    final survivalEnabled = data['settings']?['survivalSignalEnabled'] ?? false;
+    if (survivalEnabled) {
+      confidence += 0.2;
+    }
+    
+    // Check if account is approved by child app
+    final approved = data['approved'];
+    if (approved == true) {
+      confidence += 0.3;
+    }
+    
+    return confidence.clamp(0.0, 1.0);
+  }
+  
+  // Get connection codes for child app recovery helper
+  Future<List<Map<String, dynamic>>> getConnectionCodesForRecovery() async {
+    try {
+      print('Getting connection codes for recovery helper...');
+      
+      // Get active families (this would typically be called from child app)
+      final query = await _firestore
+          .collection('families')
+          .where('isActive', isEqualTo: true)
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+
+      final codes = <Map<String, dynamic>>[];
+      
+      for (final doc in query.docs) {
+        final data = doc.data();
+        codes.add({
+          'connectionCode': data['connectionCode'],
+          'elderlyName': data['elderlyName'],
+          'familyId': doc.id,
+          'approved': data['approved'],
+          'lastActivity': data['lastPhoneActivity'],
+          'createdAt': data['createdAt'],
+        });
+      }
+      
+      print('Retrieved ${codes.length} connection codes for recovery');
+      return codes;
+    } catch (e) {
+      print('Failed to get connection codes for recovery: $e');
+      return [];
+    }
+  }
+
+  // Restore local data after successful recovery
+  Future<void> _restoreLocalData({
+    required String familyId,
+    required String connectionCode,
+    required String elderlyName,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('family_id', familyId);
+      await prefs.setString('family_code', connectionCode);
+      await prefs.setString('elderly_name', elderlyName);
+      await prefs.setBool('setup_complete', true);
+      
+      // Update instance variables
+      _familyId = familyId;
+      _familyCode = connectionCode;
+      _elderlyName = elderlyName;
+      
+      print('Local data restored successfully');
+    } catch (e) {
+      print('Failed to restore local data: $e');
+      throw e;
+    }
+  }
+
+  // Recovery code display removed - using name + connection code only
+
+  // Check if user has existing account data (for recovery prompts)
+  Future<bool> hasExistingAccountData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasConnectionCode = prefs.getString('family_code') != null;
+      return hasConnectionCode;
+    } catch (e) {
+      print('Failed to check existing account data: $e');
+      return false;
+    }
+  }
+
   // Getters
   String? get familyId => _familyId;
   String? get familyCode => _familyCode;
   String? get elderlyName => _elderlyName;
   bool get isSetup => _familyCode != null && _familyId != null;
+  
+  // Recovery code getter removed - using name + connection code only
 }

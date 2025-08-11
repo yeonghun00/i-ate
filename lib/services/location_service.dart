@@ -7,7 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 
 class LocationService {
-  static const String _locationEnabledKey = 'location_tracking_enabled';
+  static const String _locationEnabledKey = 'flutter.location_tracking_enabled';
   static const String _lastLocationKey = 'last_location';
   static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
   
@@ -88,11 +88,30 @@ class LocationService {
       return false;
     }
     
+    // For background location tracking, we need "always" permission
+    if (permission == LocationPermission.whileInUse) {
+      print('⚠️ Location permission granted but only for "while in use" - background tracking may be limited');
+      print('💡 For continuous background tracking, "Always allow" permission is recommended');
+    }
+    
     return true;
+  }
+
+  // Check for "Always allow" background location permission
+  static Future<bool> hasBackgroundLocationPermission() async {
+    final permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.always;
   }
 
   // Check additional permissions for background location
   static Future<bool> checkBackgroundLocationPermission() async {
+    // Check for "Always allow" location permission
+    final hasAlwaysPermission = await hasBackgroundLocationPermission();
+    if (!hasAlwaysPermission) {
+      print('⚠️ Background location permission not granted - tracking may stop when app is closed');
+      print('💡 Please enable "Always allow" location permission for continuous background tracking');
+    }
+    
     // Check battery optimization (recommended for better background tracking)
     final ignoreBatteryOptimizations = await Permission.ignoreBatteryOptimizations.status;
     if (!ignoreBatteryOptimizations.isGranted) {
@@ -104,7 +123,7 @@ class LocationService {
       }
     }
     
-    return true;
+    return hasAlwaysPermission;
   }
   
   // Get current location

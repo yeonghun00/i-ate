@@ -16,6 +16,7 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   bool _isLoading = false;
   String? _generatedCode;
+  // Recovery code variable removed
 
   Future<void> _setupFamily() async {
     if (_nameController.text.trim().isEmpty) {
@@ -33,10 +34,11 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
       if (result != null) {
         setState(() {
           _generatedCode = _firebaseService.familyCode;
+          // Recovery code removed
         });
         
-        // Wait a moment to show the code, then complete setup
-        await Future.delayed(const Duration(seconds: 3));
+        // Wait a moment to show the codes, then complete setup
+        await Future.delayed(const Duration(seconds: 5));
         widget.onSetupComplete();
       } else {
         _showMessage('설정에 실패했습니다. 다시 시도해주세요.');
@@ -157,6 +159,8 @@ class _FamilySetupScreenState extends State<FamilySetupScreen> {
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  
+                  // Recovery code display removed - using name + connection code only
                   
                 ] else ...[
                   // Setup form

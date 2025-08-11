@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/location_service.dart';
@@ -19,10 +20,11 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   final FirebaseService _firebaseService = FirebaseService();
   String? _familyCode;
   String? _elderlyName;
+  // Recovery code removed - using name + connection code only
   bool _survivalSignalEnabled = false;
   int _alertHours = 12;
   String? _familyContact;
@@ -32,19 +34,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // When app resumes, check if permissions changed in system settings
+    if (state == AppLifecycleState.resumed) {
+      print('🔄 App resumed - checking if GPS permissions changed...');
+      _loadSettings();
+    }
   }
 
   Future<void> _loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      // Check actual location permission status
+      bool hasBackgroundLocationPermission = await _checkBackgroundLocationPermission();
+      bool savedLocationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
+      
+      // If setting says enabled but permission is missing, disable it
+      bool actualLocationEnabled = savedLocationEnabled && hasBackgroundLocationPermission;
+      
+      if (savedLocationEnabled && !hasBackgroundLocationPermission) {
+        print('⚠️ GPS was enabled but background location permission is missing - disabling');
+        await prefs.setBool('flutter.location_tracking_enabled', false);
+        await LocationService.setLocationTrackingEnabled(false);
+      }
+      
       setState(() {
         _familyCode = _firebaseService.familyCode;
         _elderlyName = _firebaseService.elderlyName;
+        // Recovery code loading removed
         _survivalSignalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
         _alertHours = prefs.getInt('alert_hours') ?? 12;
         _familyContact = prefs.getString('family_contact');
-        _locationTrackingEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
+        _locationTrackingEnabled = actualLocationEnabled;
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
       });
     } catch (e) {
@@ -267,6 +301,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: '가족 코드',
                     value: _familyCode ?? '설정되지 않음',
                   ),
+                  const SizedBox(height: 12),
+                  // Recovery code display removed - using name + connection code only
                 ],
               ),
 
@@ -278,8 +314,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _buildToggleItem(
                     icon: Icons.health_and_safety,
-                    title: '안전 알림 서비스',
-                    subtitle: '휴대폰 사용 여부를 자녀에게 알려서 안전 확인',
+                    title: '안전 확인 알림',
+                    subtitle: '휴대폰 사용이 없으면 자녀에게 안전 확인 알림 발송',
                     value: _survivalSignalEnabled,
                     onChanged: (value) {
                       setState(() {
@@ -300,20 +336,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   
                   const SizedBox(height: 16),
                   
-                  _buildToggleItem(
-                    icon: Icons.location_on_rounded,
-                    title: 'GPS 위치 추적',
-                    subtitle: '위치 정보를 자녀에게 공유',
-                    value: _locationTrackingEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _locationTrackingEnabled = value;
-                      });
-                      Future.delayed(const Duration(milliseconds: 300), () {
-                        _updateLocationSettings();
-                      });
-                    },
-                  ),
+                  _buildLocationToggleItem(),
                   
                   const SizedBox(height: 16),
                   
@@ -429,6 +452,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required IconData icon,
     required String label,
     required String value,
+    String? subtitle,
   }) {
     return Row(
       children: [
@@ -459,6 +483,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: Color(0xFF2E3440),
                 ),
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -472,6 +506,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    Color? subtitleColor,
   }) {
     return Row(
       children: [
@@ -496,9 +531,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
-                  color: Color(0xFF6B7280),
+                  color: subtitleColor ?? const Color(0xFF6B7280),
                 ),
               ),
             ],
@@ -672,6 +707,140 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // Build location toggle with dynamic subtitle showing permission status
+  Widget _buildLocationToggleItem() {
+    return FutureBuilder<bool>(
+      future: _checkBackgroundLocationPermission(),
+      builder: (context, snapshot) {
+        bool hasPermission = snapshot.data ?? false;
+        String subtitle;
+        Color subtitleColor;
+        
+        if (_locationTrackingEnabled && hasPermission) {
+          subtitle = '✅ 위치 정보를 자녀에게 공유 (2분마다)';
+          subtitleColor = const Color(0xFF10B981);
+        } else if (_locationTrackingEnabled && !hasPermission) {
+          subtitle = '⚠️ "항상 허용" 권한이 필요합니다';
+          subtitleColor = const Color(0xFFEF4444);
+        } else {
+          subtitle = '위치 정보를 자녀에게 공유';
+          subtitleColor = const Color(0xFF6B7280);
+        }
+        
+        return _buildToggleItem(
+          icon: Icons.location_on_rounded,
+          title: 'GPS 위치 추적',
+          subtitle: subtitle,
+          subtitleColor: subtitleColor,
+          value: _locationTrackingEnabled,
+          onChanged: (value) async {
+            if (value) {
+              // When enabling GPS, request background location permissions first
+              bool permissionGranted = await _requestBackgroundLocationPermission();
+              if (permissionGranted) {
+                setState(() {
+                  _locationTrackingEnabled = true;
+                });
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  _updateLocationSettings();
+                });
+              } else {
+                // Permission denied, show explanation
+                _showLocationPermissionDialog();
+              }
+            } else {
+              // Disabling GPS - no permission needed
+              setState(() {
+                _locationTrackingEnabled = false;
+              });
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _updateLocationSettings();
+              });
+            }
+          },
+        );
+      },
+    );
+  }
+
+  // Check if background location permission is currently granted
+  Future<bool> _checkBackgroundLocationPermission() async {
+    PermissionStatus status = await Permission.locationAlways.status;
+    bool granted = status.isGranted;
+    
+    print('📍 Background location permission status: $status (granted: $granted)');
+    return granted;
+  }
+
+  // Request background location permission with proper two-step flow
+  Future<bool> _requestBackgroundLocationPermission() async {
+    print('🔄 Starting two-step background location permission flow...');
+    
+    // Step 1: Request foreground location permissions first
+    Map<Permission, PermissionStatus> foregroundStatuses = await [
+      Permission.locationWhenInUse,
+      Permission.location,
+    ].request();
+    
+    bool foregroundGranted = foregroundStatuses[Permission.locationWhenInUse]?.isGranted == true ||
+                            foregroundStatuses[Permission.location]?.isGranted == true;
+    
+    if (!foregroundGranted) {
+      print('❌ Foreground location permission denied');
+      return false;
+    }
+    
+    print('✅ Step 1 completed: Foreground location permission granted');
+    
+    // Step 2: Now request background location permission (this shows "Always allow" option)
+    await Future.delayed(const Duration(milliseconds: 500));
+    PermissionStatus backgroundStatus = await Permission.locationAlways.request();
+    
+    bool backgroundGranted = backgroundStatus.isGranted;
+    
+    if (backgroundGranted) {
+      print('🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!');
+      print('✅ GPS will now work continuously every 2 minutes even when app is killed');
+    } else {
+      print('⚠️ Background location permission DENIED - user selected "While using app" or denied');
+    }
+    
+    return backgroundGranted;
+  }
+
+  // Show dialog explaining why background location permission is needed
+  void _showLocationPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('GPS 위치 권한 필요'),
+          content: const Text(
+            'GPS 위치 추적이 제대로 작동하려면 "항상 허용" 권한이 필요합니다.\n\n'
+            '설정에서 위치 권한을 "항상 허용"으로 변경해주세요.\n\n'
+            '앱이 백그라운드에서도 2분마다 위치를 자녀에게 전송할 수 있습니다.'
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Open app settings
+                openAppSettings();
+              },
+              child: const Text('설정 열기'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

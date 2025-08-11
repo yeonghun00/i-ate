@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
+import 'package:thanks_everyday/screens/background_location_guide_screen.dart';
 
 class PermissionGuideScreen extends StatefulWidget {
   final VoidCallback onPermissionsGranted;
@@ -13,9 +14,11 @@ class PermissionGuideScreen extends StatefulWidget {
 
 class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
   bool _locationGranted = false;
+  bool _backgroundLocationGranted = false;
   bool _batteryOptimizationGranted = false;
   bool _overlayGranted = false;
   bool _isChecking = false;
+  bool _showingBackgroundGuide = false;
 
   @override
   void initState() {
@@ -25,16 +28,18 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
 
   Future<void> _checkPermissions() async {
     final locationStatus = await Permission.locationWhenInUse.status;
+    final backgroundLocationStatus = await Permission.locationAlways.status;
     final batteryOptimizationStatus = await Permission.ignoreBatteryOptimizations.status;
     final overlayStatus = await Permission.systemAlertWindow.status;
 
     setState(() {
       _locationGranted = locationStatus.isGranted;
+      _backgroundLocationGranted = backgroundLocationStatus.isGranted;
       _batteryOptimizationGranted = batteryOptimizationStatus.isGranted;
       _overlayGranted = overlayStatus.isGranted;
     });
 
-    if (_locationGranted && _batteryOptimizationGranted && _overlayGranted) {
+    if (_locationGranted && _backgroundLocationGranted && _batteryOptimizationGranted && _overlayGranted) {
       widget.onPermissionsGranted();
     }
   }
@@ -45,19 +50,31 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
     });
 
     try {
-      final results = await [
+      // Step 1: Request foreground location permissions first
+      final foregroundResults = await [
         Permission.locationWhenInUse,
         Permission.ignoreBatteryOptimizations,
         Permission.systemAlertWindow,
       ].request();
 
       setState(() {
-        _locationGranted = results[Permission.locationWhenInUse]?.isGranted ?? false;
-        _batteryOptimizationGranted = results[Permission.ignoreBatteryOptimizations]?.isGranted ?? false;
-        _overlayGranted = results[Permission.systemAlertWindow]?.isGranted ?? false;
+        _locationGranted = foregroundResults[Permission.locationWhenInUse]?.isGranted ?? false;
+        _batteryOptimizationGranted = foregroundResults[Permission.ignoreBatteryOptimizations]?.isGranted ?? false;
+        _overlayGranted = foregroundResults[Permission.systemAlertWindow]?.isGranted ?? false;
       });
 
-      if (_locationGranted && _batteryOptimizationGranted && _overlayGranted) {
+      // Step 2: Only request background location if foreground location is granted
+      if (_locationGranted) {
+        print('✅ Foreground location granted, showing background location guide...');
+        
+        // Show background location guide before requesting permission
+        await _showBackgroundLocationGuide();
+        
+      } else {
+        print('❌ Foreground location not granted, cannot request background location');
+      }
+
+      if (_locationGranted && _backgroundLocationGranted && _batteryOptimizationGranted && _overlayGranted) {
         widget.onPermissionsGranted();
       }
     } catch (e) {
@@ -66,6 +83,52 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
       setState(() {
         _isChecking = false;
       });
+    }
+  }
+
+  Future<void> _showBackgroundLocationGuide() async {
+    setState(() {
+      _showingBackgroundGuide = true;
+    });
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => BackgroundLocationGuideScreen(
+          onContinue: () {
+            Navigator.of(context).pop();
+          },
+        ),
+      ),
+    );
+
+    setState(() {
+      _showingBackgroundGuide = false;
+    });
+
+    // Now request background location permission
+    await _requestBackgroundLocationPermission();
+  }
+
+  Future<void> _requestBackgroundLocationPermission() async {
+    print('🔄 Requesting background location permission...');
+    
+    // Add a small delay to ensure the system is ready
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    final backgroundResult = await Permission.locationAlways.request();
+    setState(() {
+      _backgroundLocationGranted = backgroundResult.isGranted;
+    });
+    
+    if (_backgroundLocationGranted) {
+      print('✅ Background location granted - "Always allow" option was selected');
+    } else {
+      print('❌ Background location denied - user selected "While using app" or denied');
+    }
+
+    // Check if all permissions are now granted
+    if (_locationGranted && _backgroundLocationGranted && _batteryOptimizationGranted && _overlayGranted) {
+      widget.onPermissionsGranted();
     }
   }
 
@@ -151,9 +214,19 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
                 // Permission items
                 _buildPermissionItem(
                   icon: Icons.location_on_rounded,
-                  title: 'GPS 위치 접근',
-                  description: '위치 추적 및 안전 확인을 위해 필요합니다',
+                  title: 'GPS 위치 접근 (앱 사용 중)',
+                  description: '앱을 사용하는 동안 위치 추적을 위해 필요합니다',
                   granted: _locationGranted,
+                ),
+                
+                const SizedBox(height: 16),
+                
+                _buildPermissionItem(
+                  icon: Icons.my_location_rounded,
+                  title: 'GPS 백그라운드 추적',
+                  description: '앱이 꺼져도 지속적인 위치 추적을 위해 필요합니다',
+                  granted: _backgroundLocationGranted,
+                  isImportant: true,
                 ),
                 
                 const SizedBox(height: 16),
@@ -241,12 +314,17 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen> {
     required String title,
     required String description,
     required bool granted,
+    bool isImportant = false,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
+        border: isImportant ? Border.all(
+          color: granted ? AppTheme.primaryGreen : Colors.orange,
+          width: 2,
+        ) : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.1),

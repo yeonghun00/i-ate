@@ -263,4 +263,30 @@ class ScreenMonitorService {
       print('Failed to send survival alert to Firebase: $e');
     }
   }
+  
+  // CRITICAL: Check OEM-specific auto-start permissions
+  static Future<Map<String, dynamic>?> checkAutoStartPermission() async {
+    try {
+      final result = await _channel.invokeMethod('checkAutoStartPermission');
+      return Map<String, dynamic>.from(result);
+    } on PlatformException catch (e) {
+      print('Failed to check auto-start permission: ${e.message}');
+      return null;
+    }
+  }
+  
+  // CRITICAL: Open OEM-specific auto-start settings
+  static Future<void> openAutoStartSettings() async {
+    try {
+      await _channel.invokeMethod('openAutoStartSettings');
+    } on PlatformException catch (e) {
+      print('Failed to open auto-start settings: ${e.message}');
+    }
+  }
+  
+  // CRITICAL: Check if device requires auto-start permission for reboot functionality
+  static Future<bool> requiresAutoStartPermission() async {
+    final info = await checkAutoStartPermission();
+    return info?['requiresAutoStart'] ?? false;
+  }
 }

@@ -16,23 +16,69 @@ async function getFamilyMemberTokens(familyId) {
       return [];
     }
     
-    const members = familyDoc.data()?.members || [];
-    console.log('Found family members:', members);
+    const familyData = familyDoc.data();
+    const connectionCode = familyData?.connectionCode;
     
+    if (!connectionCode) {
+      console.log('No connection code found for family:', familyId);
+      return [];
+    }
+    
+    console.log('Looking for child apps with connection code:', connectionCode);
+    
+    // Method 1: Try to find tokens via users collection with familyCodes
     const tokens = [];
-    for (const userId of members) {
-      const userDoc = await admin.firestore()
+    
+    try {
+      const usersSnapshot = await admin.firestore()
         .collection('users')
-        .doc(userId)
+        .where('familyCodes', 'array-contains', connectionCode)
         .get();
       
-      if (userDoc.exists) {
-        const fcmToken = userDoc.data()?.fcmToken;
+      console.log('Found users with familyCodes:', usersSnapshot.size);
+      
+      usersSnapshot.forEach(userDoc => {
+        const userData = userDoc.data();
+        const fcmToken = userData.fcmToken;
         if (fcmToken) {
           tokens.push(fcmToken);
-          console.log('Added FCM token for user:', userId);
+          console.log('Added FCM token for user:', userDoc.id);
         }
+      });
+    } catch (error) {
+      console.log('familyCodes method failed, trying alternative approach:', error.message);
+    }
+    
+    // Method 2: Check child_devices subcollection (alternative approach)
+    if (tokens.length === 0) {
+      try {
+        const devicesSnapshot = await admin.firestore()
+          .collection('families')
+          .doc(familyId)
+          .collection('child_devices')
+          .where('is_active', '==', true)
+          .get();
+        
+        console.log('Found child devices:', devicesSnapshot.size);
+        
+        devicesSnapshot.forEach(deviceDoc => {
+          const deviceData = deviceDoc.data();
+          const fcmToken = deviceData.fcm_token;
+          if (fcmToken) {
+            tokens.push(fcmToken);
+            console.log('Added FCM token from child_devices:', deviceDoc.id);
+          }
+        });
+      } catch (error) {
+        console.log('child_devices method failed:', error.message);
       }
+    }
+    
+    // Method 3: Direct lookup in family document (if tokens stored there)
+    if (tokens.length === 0) {
+      const directTokens = familyData?.childAppTokens || [];
+      tokens.push(...directTokens);
+      console.log('Added direct tokens from family doc:', directTokens.length);
     }
     
     console.log('Total FCM tokens found:', tokens.length);
@@ -188,12 +234,12 @@ exports.sendNotification = functions.runWith({
   }
 });
 
-// Monitor all families for survival alerts - RUNS EVERY 2 MINUTES ON GOOGLE'S SERVERS (FOR TESTING)
+// Monitor all families for survival alerts - RUNS EVERY 15 MINUTES ON GOOGLE'S SERVERS
 exports.checkFamilySurvival = functions.pubsub
-  .schedule('every 2 minutes')
+  .schedule('every 15 minutes')
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
-    console.log('🔍 Checking family survival status every 2 minutes for testing...');
+    console.log('🔍 Checking family survival status every 15 minutes...');
     
     try {
       const familiesSnapshot = await admin.firestore()

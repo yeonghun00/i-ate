@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:thanks_everyday/services/location_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
@@ -92,10 +94,46 @@ class _AppWrapperState extends State<AppWrapper> {
       // Also check SharedPreferences for setup completion
       final prefs = await SharedPreferences.getInstance();
       final setupComplete = prefs.getBool('setup_complete') ?? false;
+      
+      // Check if we have family code stored locally
+      final hasFamilyCode = prefs.getString('family_code') != null;
 
       print(
         'Firebase setup: $isSetup, SharedPreferences setup: $setupComplete',
       );
+      print('Has family code: $hasFamilyCode');
+
+      // Auto-recovery with 8-digit codes removed - using name + connection code only
+
+      // NEW: Auto-detection of existing accounts
+      if (!isSetup && !setupComplete && !hasFamilyCode) {
+        print('No existing data found, attempting auto-detection of existing accounts...');
+        try {
+          final candidates = await _firebaseService.autoDetectExistingAccounts();
+          
+          if (candidates.isNotEmpty) {
+            print('Auto-detection found ${candidates.length} potential account matches');
+            
+            // Show auto-detection results to user for selection
+            // This could be implemented as a dialog or dedicated screen
+            // For now, we'll log the results and continue with normal setup
+            for (final candidate in candidates) {
+              print('  - ${candidate['elderlyName']} (${candidate['connectionCode']}) - Confidence: ${candidate['confidence']}');
+            }
+            
+            // Optional: If there's a high-confidence match (>80%), we could prompt the user
+            final highConfidenceMatch = candidates.where((c) => c['confidence'] >= 0.8).toList();
+            if (highConfidenceMatch.isNotEmpty) {
+              print('High-confidence account found: ${highConfidenceMatch.first['elderlyName']}');
+              // Could show a dialog here asking user if this is their account
+            }
+          } else {
+            print('Auto-detection found no potential matches');
+          }
+        } catch (e) {
+          print('Auto-detection error: $e');
+        }
+      }
 
       // Be more lenient - if either Firebase OR SharedPreferences indicates setup is complete
       final actuallySetup = isSetup || setupComplete;
@@ -404,11 +442,25 @@ class _HomePageState extends State<HomePage> {
     HapticFeedback.mediumImpact();
 
     try {
+      // Test Firebase connectivity first
+      print('🔥 Testing Firebase Auth: ${FirebaseAuth.instance.currentUser?.uid}');
+      print('🔥 Testing Firestore connection...');
+      
+      await FirebaseFirestore.instance.collection('test').doc('connectivity').set({
+        'timestamp': FieldValue.serverTimestamp(),
+        'test': true,
+      });
+      print('🔥 Firebase connection OK!');
+      
+      print('🍽️ Starting meal recording...');
       final success = await FoodTrackingService.recordFoodIntake();
+      print('📱 Local food service result: $success');
+      
       final firebaseSuccess = await _firebaseService.saveMealRecord(
         timestamp: DateTime.now(),
         mealNumber: _todayMealCount + 1,
       );
+      print('🔥 Firebase service result: $firebaseSuccess');
 
       if (success && firebaseSuccess) {
         // Only load from Firebase since it's the source of truth
@@ -840,38 +892,6 @@ class _HomePageState extends State<HomePage> {
             
             const SizedBox(height: 20),
             
-            // Simple service status check button for debugging
-            ElevatedButton(
-              onPressed: () async {
-                print('📊 📊 SERVICE STATUS CHECK 📊 📊');
-                
-                final prefs = await SharedPreferences.getInstance();
-                final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
-                final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
-                
-                print('Settings:');
-                print('  - Survival signal: $survivalEnabled');
-                print('  - Location tracking: $locationEnabled');
-                
-                if (survivalEnabled) {
-                  print('🔧 Screen monitoring service is active');
-                  print('  - Native service handles background updates automatically');
-                }
-                
-                if (locationEnabled) {
-                  print('📍 Testing location service...');
-                  final position = await LocationService.getCurrentLocation();
-                  if (position != null) {
-                    print('  - Location service responded: ${position.latitude}, ${position.longitude}');
-                  } else {
-                    print('  - Location service NOT responding');
-                  }
-                }
-                
-                print('📊 Service check completed - close app and check Firebase in 15 minutes');
-              },
-              child: const Text('Test Services'),
-            ),
             
           ],
         ),

@@ -54,6 +54,16 @@ class MainActivity : FlutterActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
+        
+        // Clean up EnhancedUsageMonitor to prevent memory leak
+        try {
+            enhancedUsageMonitor?.stopMonitoring()
+            enhancedUsageMonitor = null
+            Log.d(TAG, "✅ EnhancedUsageMonitor cleaned up")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error cleaning up EnhancedUsageMonitor: ${e.message}")
+        }
+        
         // ScreenStateReceiver is managed by system (AndroidManifest.xml)
     }
 
@@ -90,6 +100,10 @@ class MainActivity : FlutterActivity() {
                     requestLocationPermissions()
                     result.success(true)
                 }
+                "requestBackgroundLocationPermission" -> {
+                    requestBackgroundLocationPermission()
+                    result.success(true)
+                }
                 "checkUsageStatsPermission" -> {
                     val hasPermission = hasUsageStatsPermission()
                     result.success(hasPermission)
@@ -108,6 +122,30 @@ class MainActivity : FlutterActivity() {
                 }
                 "requestBatteryOptimizationDisable" -> {
                     requestDisableBatteryOptimization()
+                    result.success(true)
+                }
+                "checkAutoStartPermission" -> {
+                    val autoStartInfo = checkAutoStartPermission()
+                    result.success(autoStartInfo)
+                }
+                "openAutoStartSettings" -> {
+                    openAutoStartSettings()
+                    result.success(true)
+                }
+                "checkAdvancedBatteryOptimization" -> {
+                    val batteryInfo = checkAdvancedBatteryOptimization()
+                    result.success(batteryInfo)
+                }
+                "openMIUIBatterySettings" -> {
+                    openMIUIBatterySettings()
+                    result.success(true)
+                }
+                "checkExactAlarmPermission" -> {
+                    val canScheduleExact = checkExactAlarmPermission()
+                    result.success(canScheduleExact)
+                }
+                "requestExactAlarmPermission" -> {
+                    requestExactAlarmPermission()
                     result.success(true)
                 }
                 "getScreenOnCount" -> {
@@ -197,8 +235,8 @@ class MainActivity : FlutterActivity() {
             }
             
             if (locationEnabled) {
-                Log.d(TAG, "✅ Restoring GPS location tracking alarms") 
-                AlarmUpdateReceiver.scheduleGpsAlarm(this)
+                Log.d(TAG, "✅ Restoring GPS location tracking with alarm approach") 
+                AlarmUpdateReceiver.enableLocationTracking(this)
             }
             
             if (!survivalEnabled && !locationEnabled) {
@@ -247,7 +285,7 @@ class MainActivity : FlutterActivity() {
     }
     
     private fun startLocationTracking() {
-        Log.d(TAG, "Starting GPS location tracking")
+        Log.d(TAG, "🌍 Starting GPS location tracking with RESTORED ALARM APPROACH")
         
         try {
             // Check location permissions
@@ -258,10 +296,11 @@ class MainActivity : FlutterActivity() {
             Log.d(TAG, "  - Location permissions: $hasLocationPermissions")
             Log.d(TAG, "  - Battery optimization disabled: $batteryOptimized")
             
-            // Enable location tracking using new independent method
+            // RESTORED: Use proven GPS alarm approach that survives app termination
             AlarmUpdateReceiver.enableLocationTracking(this)
             
-            Log.d(TAG, "GPS location tracking started successfully - updates every 2 minutes")
+            Log.d(TAG, "✅ GPS alarm tracking started successfully - survives app termination")
+            Log.d(TAG, "✅ This alarm approach was working before the service changes!")
             
             if (!hasLocationPermissions) {
                 Log.w(TAG, "⚠️ Location permissions missing - GPS tracking will not work!")
@@ -325,33 +364,44 @@ class MainActivity : FlutterActivity() {
     }
     
     private fun requestLocationPermissions() {
-        val permissionsToRequest = mutableListOf<String>()
+        // STEP 1: Request foreground location permissions first
+        val foregroundPermissionsToRequest = mutableListOf<String>()
         
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            foregroundPermissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
         
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            foregroundPermissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
         
-        if (permissionsToRequest.isNotEmpty()) {
-            Log.d(TAG, "Requesting location permissions: $permissionsToRequest")
+        if (foregroundPermissionsToRequest.isNotEmpty()) {
+            Log.d(TAG, "🔄 STEP 1: Requesting foreground location permissions: $foregroundPermissionsToRequest")
             ActivityCompat.requestPermissions(
                 this,
-                permissionsToRequest.toTypedArray(),
+                foregroundPermissionsToRequest.toTypedArray(),
                 LOCATION_PERMISSION_REQUEST_CODE
             )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // If basic location permissions are granted, request background location
+        } else {
+            // STEP 2: If foreground permissions are already granted, request background permission
+            requestBackgroundLocationPermission()
+        }
+    }
+    
+    private fun requestBackgroundLocationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                Log.d(TAG, "Requesting background location permission")
+                Log.d(TAG, "🔄 STEP 2: Requesting background location permission (this triggers 'Always allow' option)")
                 ActivityCompat.requestPermissions(
                     this,
                     arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-                    LOCATION_PERMISSION_REQUEST_CODE
+                    LOCATION_PERMISSION_REQUEST_CODE + 1 // Different request code for background permission
                 )
+            } else {
+                Log.d(TAG, "✅ Background location permission already granted")
             }
+        } else {
+            Log.d(TAG, "ℹ️ Background location permission not required for API < 29")
         }
     }
 
@@ -373,23 +423,37 @@ class MainActivity : FlutterActivity() {
         
         when (requestCode) {
             LOCATION_PERMISSION_REQUEST_CODE -> {
+                // Handle foreground location permissions
                 var allGranted = true
                 for (i in permissions.indices) {
                     val permission = permissions[i]
                     val granted = grantResults[i] == PackageManager.PERMISSION_GRANTED
-                    Log.d(TAG, "Permission $permission: ${if (granted) "GRANTED" else "DENIED"}")
+                    Log.d(TAG, "Foreground permission $permission: ${if (granted) "GRANTED" else "DENIED"}")
                     if (!granted) allGranted = false
                 }
                 
                 if (allGranted) {
-                    Log.d(TAG, "✅ All requested location permissions granted")
-                    // If basic permissions are granted and we're API 29+, request background permission
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && 
-                        !permissions.contains(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
-                        requestLocationPermissions() // This will request background permission
-                    }
+                    Log.d(TAG, "✅ All foreground location permissions granted")
+                    // STEP 2: Now request background location permission
+                    requestBackgroundLocationPermission()
                 } else {
-                    Log.w(TAG, "❌ Some location permissions were denied")
+                    Log.w(TAG, "❌ Some foreground location permissions were denied - cannot proceed to background permission")
+                }
+            }
+            LOCATION_PERMISSION_REQUEST_CODE + 1 -> {
+                // Handle background location permission
+                for (i in permissions.indices) {
+                    val permission = permissions[i]
+                    val granted = grantResults[i] == PackageManager.PERMISSION_GRANTED
+                    if (permission == Manifest.permission.ACCESS_BACKGROUND_LOCATION) {
+                        if (granted) {
+                            Log.d(TAG, "🎉 SUCCESS: Background location permission GRANTED - 'Always allow' was selected!")
+                            Log.d(TAG, "✅ GPS will now work continuously in background even when app is killed")
+                        } else {
+                            Log.w(TAG, "⚠️ Background location permission DENIED - user selected 'While using app' or denied")
+                            Log.w(TAG, "📱 GPS tracking will only work when app is in foreground or recently used")
+                        }
+                    }
                 }
             }
         }
@@ -493,17 +557,17 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun stopLocationMonitoring() {
-        Log.d(TAG, "Stopping GPS location tracking")
+        Log.d(TAG, "🛑 Stopping GPS location tracking")
         
         try {
-            // Disable GPS tracking using independent method (survival signal continues if enabled)
+            // RESTORED: Stop GPS alarm approach
             AlarmUpdateReceiver.disableLocationTracking(this)
             
-            Log.d(TAG, "GPS location tracking stopped successfully:")
-            Log.d(TAG, "  - AlarmManager: Only GPS alarm cancelled")
+            Log.d(TAG, "✅ GPS alarm tracking stopped successfully:")
+            Log.d(TAG, "  - GPS alarms: Cancelled")
             Log.d(TAG, "  - Survival signal continues: If survival monitoring is still enabled")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to stop GPS location tracking: ${e.message}")
+            Log.e(TAG, "❌ Failed to stop GPS location tracking: ${e.message}")
         }
     }
     
@@ -522,6 +586,362 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to check screen state: ${e.message}")
             false
+        }
+    }
+    
+    // CRITICAL: Check OEM-specific auto-start permissions
+    private fun checkAutoStartPermission(): HashMap<String, Any> {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val model = Build.MODEL.lowercase()
+        val brand = Build.BRAND.lowercase()
+        
+        Log.d(TAG, "🔍 Checking auto-start permission for device:")
+        Log.d(TAG, "  - Manufacturer: $manufacturer")
+        Log.d(TAG, "  - Brand: $brand")
+        Log.d(TAG, "  - Model: $model")
+        
+        val oemInfo = when {
+            manufacturer.contains("xiaomi") || brand.contains("xiaomi") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "MIUI",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 앱 → 권한 → 자동시작 → 이 앱을 허용으로 변경하세요"
+                )
+            }
+            manufacturer.contains("oppo") || brand.contains("oppo") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "ColorOS",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 앱 관리 → 자동시작 관리 → 이 앱을 허용으로 변경하세요"
+                )
+            }
+            manufacturer.contains("vivo") || brand.contains("vivo") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "FunTouch OS",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 더보기 설정 → 권한 관리 → 자동시작 → 이 앱을 허용으로 변경하세요"
+                )
+            }
+            manufacturer.contains("huawei") || brand.contains("huawei") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "EMUI",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 앱 → 앱 시작 관리 → 이 앱을 수동으로 관리하고 모두 허용하세요"
+                )
+            }
+            manufacturer.contains("honor") || brand.contains("honor") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "Magic UI",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 앱 → 앱 시작 관리 → 이 앱을 수동으로 관리하고 모두 허용하세요"
+                )
+            }
+            manufacturer.contains("oneplus") || brand.contains("oneplus") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "OxygenOS",
+                    "requiresAutoStart" to true,
+                    "settingsName" to "자동 시작",
+                    "instructions" to "설정 → 앱 → 특별한 앱 접근 → 자동시작 → 이 앱을 허용으로 변경하세요"
+                )
+            }
+            else -> {
+                hashMapOf<String, Any>(
+                    "oem" to "Stock Android",
+                    "requiresAutoStart" to false,
+                    "settingsName" to "",
+                    "instructions" to ""
+                )
+            }
+        }
+        
+        val hasBootPermission = checkSelfPermission(android.Manifest.permission.RECEIVE_BOOT_COMPLETED) == 
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        
+        Log.d(TAG, "🔍 Auto-start analysis:")
+        Log.d(TAG, "  - OEM: ${oemInfo["oem"]}")
+        Log.d(TAG, "  - Requires auto-start: ${oemInfo["requiresAutoStart"]}")
+        Log.d(TAG, "  - BOOT permission: $hasBootPermission")
+        
+        return hashMapOf<String, Any>(
+            "manufacturer" to manufacturer,
+            "brand" to brand,
+            "model" to model,
+            "oem" to (oemInfo["oem"] ?: ""),
+            "requiresAutoStart" to (oemInfo["requiresAutoStart"] ?: false),
+            "settingsName" to (oemInfo["settingsName"] ?: ""),
+            "instructions" to (oemInfo["instructions"] ?: ""),
+            "hasBootPermission" to hasBootPermission
+        )
+    }
+    
+    private fun openAutoStartSettings() {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        
+        try {
+            val intent = when {
+                manufacturer.contains("xiaomi") || brand.contains("xiaomi") -> {
+                    // MIUI Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.miui.securitycenter", 
+                            "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                        )
+                    }
+                }
+                manufacturer.contains("oppo") || brand.contains("oppo") -> {
+                    // ColorOS Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.coloros.safecenter", 
+                            "com.coloros.safecenter.permission.startup.FakeActivity"
+                        )
+                    }
+                }
+                manufacturer.contains("vivo") || brand.contains("vivo") -> {
+                    // Vivo Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.iqoo.secure", 
+                            "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"
+                        )
+                    }
+                }
+                manufacturer.contains("huawei") || brand.contains("huawei") -> {
+                    // EMUI Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.huawei.systemmanager", 
+                            "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+                        )
+                    }
+                }
+                manufacturer.contains("honor") || brand.contains("honor") -> {
+                    // Honor Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.huawei.systemmanager", 
+                            "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+                        )
+                    }
+                }
+                manufacturer.contains("oneplus") || brand.contains("oneplus") -> {
+                    // OnePlus Auto-start settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.oneplus.security", 
+                            "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"
+                        )
+                    }
+                }
+                else -> {
+                    // Fallback to general app settings
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", packageName, null)
+                    }
+                }
+            }
+            
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            
+            Log.d(TAG, "✅ Opened auto-start settings for $manufacturer")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to open auto-start settings: ${e.message}")
+            
+            // Fallback to general app settings
+            try {
+                val fallbackIntent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallbackIntent)
+                Log.d(TAG, "✅ Opened fallback app settings")
+            } catch (fallbackException: Exception) {
+                Log.e(TAG, "❌ Fallback also failed: ${fallbackException.message}")
+            }
+        }
+    }
+    
+    // CRITICAL: Check advanced battery optimization for OEM devices
+    private fun checkAdvancedBatteryOptimization(): HashMap<String, Any> {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        
+        // Check standard battery optimization
+        val standardBatteryOptimized = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager?
+            powerManager?.let { !it.isIgnoringBatteryOptimizations(packageName) } ?: false
+        } else {
+            false
+        }
+        
+        Log.d(TAG, "🔋 Battery optimization check:")
+        Log.d(TAG, "  - Standard battery optimized: $standardBatteryOptimized")
+        Log.d(TAG, "  - Manufacturer: $manufacturer")
+        
+        // OEM-specific battery optimization guidance
+        val oemBatteryInfo = when {
+            manufacturer.contains("xiaomi") || brand.contains("xiaomi") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "MIUI",
+                    "hasAdvancedBattery" to true,
+                    "batterySettingsName" to "배터리 절약",
+                    "instructions" to "설정 → 배터리 → 앱 배터리 절약 → 이 앱을 '제한 없음'으로 설정하고, 개발자 옵션에서 MIUI 최적화도 비활성화하세요",
+                    "additionalSteps" to "개발자 옵션 → MIUI 최적화 끄기도 필요할 수 있습니다"
+                )
+            }
+            manufacturer.contains("oppo") || brand.contains("oppo") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "ColorOS",
+                    "hasAdvancedBattery" to true,
+                    "batterySettingsName" to "배터리 최적화",
+                    "instructions" to "설정 → 배터리 → 앱 배터리 사용량 → 이 앱을 '제한하지 않음'으로 설정하세요",
+                    "additionalSteps" to "추가로 '백그라운드 앱 관리'에서도 허용해야 합니다"
+                )
+            }
+            manufacturer.contains("vivo") || brand.contains("vivo") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "FunTouch OS",
+                    "hasAdvancedBattery" to true,
+                    "batterySettingsName" to "배터리 최적화",
+                    "instructions" to "설정 → 배터리 → 백그라운드 앱 새로 고침 → 이 앱을 허용으로 설정하세요",
+                    "additionalSteps" to ""
+                )
+            }
+            manufacturer.contains("huawei") || brand.contains("huawei") -> {
+                hashMapOf<String, Any>(
+                    "oem" to "EMUI",
+                    "hasAdvancedBattery" to true,
+                    "batterySettingsName" to "배터리 최적화",
+                    "instructions" to "설정 → 배터리 → 앱 실행 → 이 앱을 수동 관리로 설정하고 모든 옵션을 허용하세요",
+                    "additionalSteps" to ""
+                )
+            }
+            else -> {
+                hashMapOf<String, Any>(
+                    "oem" to "Stock Android",
+                    "hasAdvancedBattery" to false,
+                    "batterySettingsName" to "",
+                    "instructions" to "",
+                    "additionalSteps" to ""
+                )
+            }
+        }
+        
+        return hashMapOf<String, Any>(
+            "manufacturer" to manufacturer,
+            "brand" to brand,
+            "standardBatteryOptimized" to standardBatteryOptimized,
+            "oem" to (oemBatteryInfo["oem"] ?: ""),
+            "hasAdvancedBattery" to (oemBatteryInfo["hasAdvancedBattery"] ?: false),
+            "batterySettingsName" to (oemBatteryInfo["batterySettingsName"] ?: ""),
+            "instructions" to (oemBatteryInfo["instructions"] ?: ""),
+            "additionalSteps" to (oemBatteryInfo["additionalSteps"] ?: "")
+        )
+    }
+    
+    private fun openMIUIBatterySettings() {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        
+        try {
+            val intent = when {
+                manufacturer.contains("xiaomi") || brand.contains("xiaomi") -> {
+                    // MIUI Battery settings
+                    Intent().apply {
+                        component = android.content.ComponentName(
+                            "com.miui.powerkeeper", 
+                            "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"
+                        )
+                        putExtra("package_name", packageName)
+                        putExtra("package_label", applicationInfo.labelRes)
+                    }
+                }
+                manufacturer.contains("oppo") || brand.contains("oppo") -> {
+                    // ColorOS Battery settings
+                    Intent("android.settings.APPLICATION_DETAILS_SETTINGS").apply {
+                        data = android.net.Uri.fromParts("package", packageName, null)
+                    }
+                }
+                else -> {
+                    // Standard battery optimization settings
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = android.net.Uri.parse("package:$packageName")
+                        }
+                    } else {
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = android.net.Uri.fromParts("package", packageName, null)
+                        }
+                    }
+                }
+            }
+            
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            
+            Log.d(TAG, "✅ Opened battery settings for $manufacturer")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to open battery settings: ${e.message}")
+            
+            // Fallback to standard battery optimization
+            try {
+                val fallbackIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                } else {
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", packageName, null)
+                    }
+                }
+                fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(fallbackIntent)
+                Log.d(TAG, "✅ Opened fallback battery settings")
+            } catch (fallbackException: Exception) {
+                Log.e(TAG, "❌ Fallback battery settings also failed: ${fallbackException.message}")
+            }
+        }
+    }
+    
+    // CRITICAL: Check exact alarm permission for Android 12+
+    private fun checkExactAlarmPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            alarmManager.canScheduleExactAlarms()
+        } else {
+            true // Not required on older versions
+        }
+    }
+    
+    // CRITICAL: Request exact alarm permission for Android 12+
+    private fun requestExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            if (!alarmManager.canScheduleExactAlarms()) {
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                    Log.d(TAG, "✅ Opened exact alarm permission settings")
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to open exact alarm permission settings: ${e.message}")
+                }
+            } else {
+                Log.d(TAG, "✅ Exact alarm permission already granted")
+            }
+        } else {
+            Log.d(TAG, "ℹ️ Exact alarm permission not required on Android < 12")
         }
     }
     

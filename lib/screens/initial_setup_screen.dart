@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/screens/guide_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
+// DataRecoveryScreen removed - using name + connection code only
+import 'package:thanks_everyday/screens/account_recovery_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
 
@@ -360,6 +362,18 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
+
+  void _navigateToAccountRecovery() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AccountRecoveryScreen(
+          onRecoveryComplete: widget.onSetupComplete,
+        ),
+      ),
+    );
+  }
+
+  // Data recovery with 8-digit codes removed - using name + connection code only
 
   @override
   Widget build(BuildContext context) {
@@ -944,6 +958,43 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       color: Colors.white,
                                     ),
                                   ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // Account recovery option
+                      TextButton(
+                        onPressed: _navigateToAccountRecovery,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.primaryGreen.withOpacity(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.person_search_rounded,
+                                color: AppTheme.primaryGreen,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                '이미 계정이 있어요',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

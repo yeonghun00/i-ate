@@ -1,8 +1,14 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Allow authenticated users to access recordings
     match /recordings/{familyCode}/{allPaths=**} {
       allow read, write: if request.auth != null;
+    }
+    
+    // Temporary fallback for development - REMOVE IN PRODUCTION
+    match /{allPaths=**} {
+      allow read, write: if request.time < timestamp.date(2025, 12, 31);
     }
   }
 }
