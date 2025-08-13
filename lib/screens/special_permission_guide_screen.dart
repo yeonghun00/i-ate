@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
+import 'dart:io';
 
 class SpecialPermissionGuideScreen extends StatefulWidget {
   final VoidCallback onPermissionsComplete;
@@ -22,14 +24,37 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   bool _isChecking = false;
   bool _hasUsagePermission = false;
   bool _hasBatteryPermission = false;
+  bool _isMiuiDevice = false;
+  bool _miuiAutostartPermissionAcknowledged = false;
   Timer? _permissionCheckTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _detectMiuiDevice();
     _checkPermissions();
     _startPermissionPolling();
+  }
+  
+  void _detectMiuiDevice() async {
+    // Detect if this is a MIUI device (Xiaomi/Redmi)
+    if (Platform.isAndroid) {
+      _isMiuiDevice = await _isXiaomiDevice();
+      print('MIUI device detected: $_isMiuiDevice');
+      setState(() {}); // Update UI after detection
+    }
+  }
+  
+  Future<bool> _isXiaomiDevice() async {
+    try {
+      const platform = MethodChannel('com.thousandemfla.thanks_everyday/miui');
+      final bool isMiui = await platform.invokeMethod('isMiuiDevice');
+      return isMiui;
+    } catch (e) {
+      print('Error detecting MIUI device: $e');
+      return false; // Default to false if detection fails
+    }
   }
 
   @override
@@ -71,8 +96,13 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           
           // Update current step based on permissions
           if (hasUsagePermission && hasBatteryPermission) {
-            print('All permissions granted, jumping to step 2');
-            _currentStep = 2; // Complete
+            if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
+              print('Basic permissions granted, moving to MIUI autostart step');
+              _currentStep = 2; // MIUI autostart step
+            } else {
+              print('All permissions granted, jumping to completion step');
+              _currentStep = _isMiuiDevice ? 3 : 2; // Complete (adjusted for MIUI step)
+            }
           } else if (hasUsagePermission && !hasBatteryPermission) {
             print('Usage permission granted, moving to step 1 (battery optimization)');
             _currentStep = 1; // Battery optimization step
@@ -118,8 +148,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
 
   void _startPermissionPolling() {
     // Check permissions every 1 second for real-time updates
+    final maxStep = _isMiuiDevice ? 3 : 2; // Adjust for MIUI step
     _permissionCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted && _currentStep < 2) {
+      if (mounted && _currentStep < maxStep) {
         _checkPermissions();
       } else {
         timer.cancel();
@@ -144,15 +175,38 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       // Check if battery permission is granted before advancing
       if (_hasBatteryPermission) {
         setState(() {
-          _currentStep = 2;
+          _currentStep = _isMiuiDevice ? 2 : 2; // MIUI step or completion
         });
         print('Advanced to step: $_currentStep');
       } else {
         print('Cannot advance - battery permission not granted');
       }
-    } else if (_currentStep == 2) {
+    } else if (_currentStep == 2 && _isMiuiDevice) {
+      // MIUI autostart permission step
+      setState(() {
+        _miuiAutostartPermissionAcknowledged = true;
+        _currentStep = 3; // Completion step for MIUI devices
+      });
+      print('MIUI autostart permission acknowledged, advanced to step: $_currentStep');
+    } else if (_currentStep == 2 || _currentStep == 3) {
       // All done - navigate to main page
       _completeSetup();
+    }
+  }
+
+  Future<void> _openAutoStartSettings() async {
+    try {
+      const platform = MethodChannel('com.thousandemfla.thanks_everyday/miui');
+      final bool success = await platform.invokeMethod('requestAutoStartPermission');
+      
+      if (success) {
+        _showMessage('설정 화면이 열렸습니다. 자동 시작 권한을 활성화해주세요.');
+      } else {
+        _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
+      }
+    } catch (e) {
+      print('Error opening autostart settings: $e');
+      _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
     }
   }
 
@@ -165,9 +219,13 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     _permissionCheckTimer?.cancel();
     
     // Ensure we have all permissions before proceeding
-    if (!_hasUsagePermission || !_hasBatteryPermission) {
+    if (!_hasUsagePermission || !_hasBatteryPermission || (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
       print('Not all permissions granted - cannot complete setup');
-      _showMessage('모든 권한이 필요합니다. 권한을 확인해주세요.');
+      if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
+        _showMessage('MIUI 자동 시작 권한 안내를 확인해주세요.');
+      } else {
+        _showMessage('모든 권한이 필요합니다. 권한을 확인해주세요.');
+      }
       return;
     }
     
@@ -284,9 +342,10 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   }
 
   Widget _buildStepIndicator() {
+    final totalSteps = _isMiuiDevice ? 4 : 3; // Add extra step for MIUI devices
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(3, (index) {
+      children: List.generate(totalSteps, (index) {
         final isCompleted = index < _currentStep;
         final isCurrent = index == _currentStep;
         
@@ -347,7 +406,13 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       case 1:
         return _buildStep2();
       case 2:
-        return _buildStep3();
+        if (_isMiuiDevice) {
+          return _buildMiuiStep(); // MIUI autostart permission step
+        } else {
+          return _buildStep3(); // Completion step for non-MIUI
+        }
+      case 3:
+        return _buildStep3(); // Completion step for MIUI devices
       default:
         return _buildStep1();
     }
@@ -610,6 +675,122 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     );
   }
 
+  Widget _buildMiuiStep() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.smartphone,
+            size: 80,
+            color: Color(0xFFFF7043),
+          ),
+          
+          const SizedBox(height: 20),
+          
+          const Text(
+            'MIUI 자동 시작 권한 설정',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFFFF7043),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 16),
+          
+          const Text(
+            'Xiaomi/MIUI 기기에서는 앱의 재부팅 후 동작을 위해\n자동 시작 권한이 필요합니다.',
+            style: TextStyle(
+              fontSize: 16,
+              color: Color(0xFF6B7280),
+              height: 1.5,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 20),
+          
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3E0),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '설정 방법:',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFFF7043),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '1. 보안 앱 → 앱 관리 → 이 앱 찾기\n'
+                  '2. "자동 시작" 허용으로 설정\n'
+                  '3. "다른 앱에 의해 앱 시작 허용" 활성화\n'
+                  '4. 배터리 절약 모드에서 이 앱 제외',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFFFF7043),
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFCA5A5)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.warning,
+                  color: Color(0xFFDC2626),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: const Text(
+                    '이 설정 없이는 재부팅 후 생존 신호 감지가 작동하지 않습니다.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFDC2626),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionButtons() {
     if (_isChecking) {
       return const Center(
@@ -732,9 +913,125 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         );
         
       case 2:
+        if (_isMiuiDevice) {
+          // MIUI autostart permission buttons
+          return Column(
+            children: [
+              // Open Settings button
+              GestureDetector(
+                onTap: _openAutoStartSettings,
+                child: Container(
+                  width: double.infinity,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(30),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFFFF7043), Color(0xFFD84315)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF7043).withValues(alpha: 0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Text(
+                      '설정 화면 열기',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Acknowledge button  
+              GestureDetector(
+                onTap: _nextStep,
+                child: Container(
+                  width: double.infinity,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(30),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF10B981), Color(0xFF059669)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryGreen.withValues(alpha: 0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Text(
+                      '설정 완료, 다음 단계로',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        } else {
+          // Non-MIUI completion button
+          return GestureDetector(
+            onTap: () {
+              print('앱 사용 시작하기 button clicked');
+              _completeSetup();
+            },
+            child: Container(
+              width: double.infinity,
+              height: 60,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF10B981), Color(0xFF059669)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primaryGreen.withValues(alpha: 0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  '앱 사용 시작하기',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        
+      case 3:
+        // MIUI completion button
         return GestureDetector(
           onTap: () {
-            print('앱 사용 시작하기 button clicked');
+            print('MIUI 앱 사용 시작하기 button clicked');
             _completeSetup();
           },
           child: Container(

@@ -23,11 +23,14 @@ import com.thousandemfla.thanks_everyday.elder.AlarmUpdateReceiver
 import com.thousandemfla.thanks_everyday.elder.ScreenStateReceiver
 import com.thousandemfla.thanks_everyday.elder.ScreenMonitorService
 import com.thousandemfla.thanks_everyday.elder.EnhancedUsageMonitor
+import com.thousandemfla.thanks_everyday.elder.MiuiPermissionHelper
+import com.thousandemfla.thanks_everyday.elder.AlternativeBootDetector
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.thousandemfla.thanks_everyday/screen_monitor"
     private val USAGE_DETECTOR_CHANNEL = "thanks_everyday/usage_detector"
     private val OVERLAY_CHANNEL = "overlay_service"
+    private val MIUI_CHANNEL = "com.thousandemfla.thanks_everyday/miui"
     private val TAG = "MainActivity"
     private val USAGE_STATS_REQUEST_CODE = 100
     private val BATTERY_OPTIMIZATION_REQUEST_CODE = 101
@@ -38,6 +41,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // CRITICAL FIX: Check for alternative boot detection on app launch
+        checkAlternativeBootOnAppLaunch()
         
         // CRITICAL FIX: Ensure survival monitoring is restored on app startup
         // This handles cases where app was killed and user opens it again
@@ -148,6 +154,10 @@ class MainActivity : FlutterActivity() {
                     requestExactAlarmPermission()
                     result.success(true)
                 }
+                "getBootDebugLog" -> {
+                    val logContent = getBootDebugLog()
+                    result.success(logContent)
+                }
                 "getScreenOnCount" -> {
                     val count = getScreenOnCount()
                     result.success(count)
@@ -162,6 +172,49 @@ class MainActivity : FlutterActivity() {
                 }
                 "stopLocationMonitoring" -> {
                     stopLocationMonitoring()
+                    result.success(true)
+                }
+                "checkMiuiDevice" -> {
+                    val isMiui = android.os.Build.MANUFACTURER.lowercase().contains("xiaomi")
+                    result.success(isMiui)
+                }
+                "getMiuiGuidanceInfo" -> {
+                    val guidanceInfo = MiuiPermissionHelper.getMiuiGuidanceInfo(this)
+                    result.success(guidanceInfo)
+                }
+                "openMiuiAutoStartSettings" -> {
+                    val success = MiuiPermissionHelper.openAutoStartSettings(this)
+                    result.success(success)
+                }
+                "openMiuiBatterySettings" -> {
+                    val success = MiuiPermissionHelper.openAutoStartSettings(this)
+                    result.success(success)
+                }
+                "getMiuiBootStatus" -> {
+                    val status = mapOf(
+                        "isMiuiDevice" to MiuiPermissionHelper.isMiuiDevice(),
+                        "hasAutoStartPermission" to MiuiPermissionHelper.checkAutoStartPermission(this)
+                    )
+                    result.success(status)
+                }
+                "getAlternativeBootStatus" -> {
+                    val status = AlternativeBootDetector.getAlternativeDetectionStatus(this)
+                    result.success(status)
+                }
+                "startAlternativeBootDetection" -> {
+                    AlternativeBootDetector.startAlternativeDetection(this)
+                    result.success(true)
+                }
+                "stopAlternativeBootDetection" -> {
+                    AlternativeBootDetector.stopAlternativeDetection(this)
+                    result.success(true)
+                }
+                "markMiuiSetupShown" -> {
+                    MiuiPermissionHelper.markUserGuided(this)
+                    result.success(true)
+                }
+                "manualResumeMonitoring" -> {
+                    manualResumeMonitoring()
                     result.success(true)
                 }
                 else -> {
@@ -212,8 +265,70 @@ class MainActivity : FlutterActivity() {
             }
         }
         
+        // MIUI device detection channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MIUI_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isMiuiDevice" -> {
+                    val isMiui = MiuiPermissionHelper.isMiuiDevice()
+                    result.success(isMiui)
+                }
+                "requestAutoStartPermission" -> {
+                    val success = requestAutoStartPermission()
+                    result.success(success)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+        
         // CRITICAL FIX: All background monitoring handled by AlarmUpdateReceiver + ScreenStateReceiver
         // Both registered in AndroidManifest.xml for maximum reliability
+    }
+    
+    // Request MIUI autostart permission
+    private fun requestAutoStartPermission(): Boolean {
+        return try {
+            if (MiuiPermissionHelper.isMiuiDevice()) {
+                // Try to open MIUI autostart settings
+                val intent = Intent().apply {
+                    component = android.content.ComponentName(
+                        "com.miui.securitycenter", 
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                    )
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                
+                // Fallback to security center if autostart activity not found
+                val fallbackIntent = Intent().apply {
+                    component = android.content.ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.securitycenter.Main"
+                    )
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                
+                try {
+                    startActivity(intent)
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Primary autostart intent failed, trying fallback: ${e.message}")
+                    try {
+                        startActivity(fallbackIntent)
+                        true
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Both autostart intents failed: ${e2.message}")
+                        false
+                    }
+                }
+            } else {
+                Log.d(TAG, "Not a MIUI device, autostart permission not needed")
+                true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting autostart permission: ${e.message}")
+            false
+        }
     }
     
     // CRITICAL FIX: Restore monitoring on app startup
@@ -942,6 +1057,110 @@ class MainActivity : FlutterActivity() {
             }
         } else {
             Log.d(TAG, "ℹ️ Exact alarm permission not required on Android < 12")
+        }
+    }
+    
+    // Get boot debug log content for display in Flutter
+    private fun getBootDebugLog(): String {
+        return try {
+            val bootLogFile = java.io.File(filesDir, "boot_debug_log.txt")
+            if (bootLogFile.exists()) {
+                bootLogFile.readText(Charsets.UTF_8)
+            } else {
+                "No boot debug log found. This means either:\n1. Device hasn't been rebooted since app installation\n2. BootReceiver is not triggering\n3. File creation failed\n\nTo test: Reboot your device and check this screen again."
+            }
+        } catch (e: Exception) {
+            "Error reading boot debug log: ${e.message}"
+        }
+    }
+    
+    /**
+     * Check for alternative boot detection on app launch
+     */
+    private fun checkAlternativeBootOnAppLaunch() {
+        try {
+            Log.d(TAG, "🔍 Checking for alternative boot detection on app launch...")
+            
+            // Use AlternativeBootDetector to check if device was rebooted
+            val bootDetected = AlternativeBootDetector.checkForMissedBoot(this)
+            
+            if (bootDetected) {
+                Log.d(TAG, "🎉 Alternative boot detected on app launch!")
+            } else {
+                Log.d(TAG, "ℹ️ No alternative boot detected - normal app launch")
+            }
+            
+            // Start alternative detection systems for future boots
+            AlternativeBootDetector.startAlternativeDetection(this)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error in alternative boot check: ${e.message}")
+        }
+    }
+    
+    /**
+     * Manual resume monitoring - allows user to manually restart all monitoring
+     */
+    private fun manualResumeMonitoring() {
+        try {
+            Log.d(TAG, "🔄 Manual resume monitoring requested by user...")
+            
+            val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+            val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
+            
+            Log.d(TAG, "📱 Manual resume - Current settings:")
+            Log.d(TAG, "  - Survival monitoring: $survivalEnabled")
+            Log.d(TAG, "  - Location tracking: $locationEnabled")
+            
+            if (!survivalEnabled && !locationEnabled) {
+                Log.w(TAG, "⚠️ No monitoring services enabled - nothing to resume")
+                return
+            }
+            
+            // Force restart all monitoring components
+            if (survivalEnabled) {
+                Log.d(TAG, "🚀 Manually restarting survival monitoring...")
+                AlarmUpdateReceiver.enableSurvivalMonitoring(this)
+                ScreenMonitorService.startService(this)
+            }
+            
+            if (locationEnabled) {
+                Log.d(TAG, "🌍 Manually restarting location tracking...")
+                AlarmUpdateReceiver.enableLocationTracking(this)
+            }
+            
+            // Restart alternative boot detection
+            AlternativeBootDetector.startAlternativeDetection(this)
+            
+            // Check if this is a MIUI device and record manual activation
+            if (MiuiPermissionHelper.isMiuiDevice()) {
+                Log.d(TAG, "📱 MIUI device - recording manual monitoring activation")
+                prefs.edit()
+                    .putBoolean("flutter.manual_monitoring_activated", true)
+                    .putLong("flutter.manual_activation_time", System.currentTimeMillis())
+                    .apply()
+            }
+            
+            Log.d(TAG, "✅ Manual resume monitoring completed successfully")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error in manual resume monitoring: ${e.message}")
+        }
+    }
+    
+    // Simple MIUI autostart opener
+    private fun openMIUIAutostartSettings() {
+        try {
+            val intent = Intent()
+            intent.component = android.content.ComponentName("com.miui.securitycenter", 
+                "com.miui.permcenter.autostart.AutoStartManagementActivity")
+            startActivity(intent)
+        } catch (e: Exception) {
+            // Fallback to general app settings
+            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            intent.data = android.net.Uri.parse("package:$packageName")
+            startActivity(intent)
         }
     }
     

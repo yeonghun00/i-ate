@@ -5,6 +5,7 @@ import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/location_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
+import 'package:thanks_everyday/screens/boot_debug_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onDataDeleted;

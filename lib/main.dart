@@ -10,8 +10,10 @@ import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/smart_usage_detector.dart';
 import 'package:thanks_everyday/services/overlay_service.dart';
+import 'package:thanks_everyday/services/miui_boot_helper.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
+import 'package:thanks_everyday/screens/boot_debug_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
@@ -50,6 +52,13 @@ void main() async {
     print('OverlayService initialized successfully');
   } catch (e) {
     print('OverlayService initialization failed: $e');
+  }
+
+  try {
+    await MiuiBootHelper.initializeOnAppStart();
+    print('MiuiBootHelper initialized successfully');
+  } catch (e) {
+    print('MiuiBootHelper initialization failed: $e');
   }
 
   runApp(const ThanksEverydayApp());
@@ -146,6 +155,14 @@ class _AppWrapperState extends State<AppWrapper> {
         _isSetup = actuallySetup;
         _isLoading = false;
       });
+      
+      // Check for MIUI guidance even for existing users
+      if (actuallySetup) {
+        // Delay to allow UI to render first
+        Future.delayed(const Duration(seconds: 1), () {
+          _checkMiuiGuidance();
+        });
+      }
     } catch (e) {
       print('App initialization failed: $e');
       setState(() {
@@ -177,6 +194,38 @@ class _AppWrapperState extends State<AppWrapper> {
       
     } catch (e) {
       print('Failed to store setup completion: $e');
+    }
+  }
+  
+  Future<void> _checkMiuiGuidance() async {
+    try {
+      print('🔍 Checking if MIUI guidance should be shown...');
+      
+      // Check for post-boot activation first
+      final needsPostBoot = await MiuiBootHelper.needsPostBootActivation();
+      if (needsPostBoot && mounted) {
+        print('📱 Post-boot activation needed');
+        await MiuiBootHelper.showPostBootActivationDialog(context);
+        return;
+      }
+      
+      // Check if MIUI setup guidance should be shown
+      final shouldShow = await MiuiBootHelper.shouldShowMiuiGuidance();
+      if (shouldShow && mounted) {
+        print('🚨 MIUI setup guidance required');
+        
+        // Delay slightly to ensure the UI is ready
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        if (mounted) {
+          await MiuiBootHelper.showMiuiSetupDialog(context);
+        }
+      } else {
+        print('✅ No MIUI guidance required');
+      }
+      
+    } catch (e) {
+      print('❌ Error checking MIUI guidance: $e');
     }
   }
   
@@ -217,6 +266,9 @@ class _AppWrapperState extends State<AppWrapper> {
     } catch (e) {
       print('❌ Failed to initialize services after setup: $e');
     }
+    
+    // Check for MIUI guidance after setup completion
+    await _checkMiuiGuidance();
 
     // Use a more robust approach to ensure state update happens
     if (mounted) {
@@ -532,6 +584,32 @@ class _HomePageState extends State<HomePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    // Boot Debug Button
+                    GestureDetector(
+                      onTap: () => _navigateToBootDebug(context),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.bug_report,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                    // Settings Button
                     GestureDetector(
                       onTap: () => _navigateToSettings(context),
                       child: Container(
@@ -603,6 +681,14 @@ class _HomePageState extends State<HomePage> {
             // Handle any reset actions if needed
           },
         ),
+      ),
+    );
+  }
+
+  void _navigateToBootDebug(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const BootDebugScreen(),
       ),
     );
   }

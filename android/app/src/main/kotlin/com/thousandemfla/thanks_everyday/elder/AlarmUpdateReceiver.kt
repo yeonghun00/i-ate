@@ -10,6 +10,7 @@ import android.location.LocationManager
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
 import android.Manifest
+import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -23,183 +24,127 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         private const val GPS_REQUEST_CODE = 1001
         private const val SURVIVAL_REQUEST_CODE = 1002
         
-        // Separate actions for each service
+        // Actions for each service type
         private const val ACTION_GPS_UPDATE = "com.thousandemfla.thanks_everyday.GPS_UPDATE"
         private const val ACTION_SURVIVAL_UPDATE = "com.thousandemfla.thanks_everyday.SURVIVAL_UPDATE"
         
-        // Schedule GPS location tracking alarm
+        // 2-minute interval for both GPS and survival monitoring
+        private const val INTERVAL_MILLIS = 2 * 60 * 1000L
+        
+        /**
+         * Schedule GPS location tracking alarm - runs every 2 minutes
+         */
         fun scheduleGpsAlarm(context: Context) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            
-            Log.d(TAG, "🌍 Scheduling GPS location alarm...")
-            
-            // CRITICAL FIX: Validate location permissions and system readiness first
-            if (!validateLocationPermissions(context)) {
-                Log.e(TAG, "❌ GPS alarm scheduling failed: Missing location permissions")
-                return
-            }
-            
-            if (!isLocationServiceEnabled(context)) {
-                Log.w(TAG, "⚠️ Location service is disabled on device")
-            }
-            
-            // CRITICAL FIX: Add fallback for GPS just like survival monitoring
-            var useExactAlarms = true
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                if (!alarmManager.canScheduleExactAlarms()) {
-                    Log.w(TAG, "⚠️ Exact alarms not permitted for GPS, using fallback scheduling")
-                    useExactAlarms = false
+            try {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                
+                Log.d(TAG, "🌍 Scheduling GPS alarm with 2-minute interval")
+                
+                val intent = Intent(context, AlarmUpdateReceiver::class.java).apply {
+                    action = ACTION_GPS_UPDATE
                 }
-            }
-            
-            val intent = Intent(context, AlarmUpdateReceiver::class.java).apply {
-                action = ACTION_GPS_UPDATE
-            }
-            
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                GPS_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
-            val intervalMillis = 2 * 60 * 1000L // 2 minutes
-            val triggerAtMillis = SystemClock.elapsedRealtime() + intervalMillis
-            
-            Log.d(TAG, "📅 Scheduling GPS alarm:")
-            Log.d(TAG, "  - Current time: ${System.currentTimeMillis()}")
-            Log.d(TAG, "  - Trigger at (elapsed): $triggerAtMillis")
-            Log.d(TAG, "  - Interval: ${intervalMillis / 1000} seconds")
-            Log.d(TAG, "  - Use exact alarms: $useExactAlarms")
-            
-            // CRITICAL FIX: Use same robust scheduling logic as survival monitoring
-            if (useExactAlarms) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: setExactAndAllowWhileIdle (exact permitted)")
-                } else {
-                    alarmManager.setExact(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: setExact (Android 5-)")
+                
+                val pendingIntent = createPendingIntent(context, GPS_REQUEST_CODE, intent)
+                val triggerAtMillis = SystemClock.elapsedRealtime() + INTERVAL_MILLIS
+                
+                scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent, "GPS")
+                
+                Log.d(TAG, "✅ GPS alarm scheduled for ${INTERVAL_MILLIS / 1000 / 60} minutes")
+                
+                // Record scheduling time for debugging
+                try {
+                    val miuiPrefs = context.getSharedPreferences("MiuiAlarmPrefs", Context.MODE_PRIVATE)
+                    miuiPrefs.edit()
+                        .putLong("last_gps_alarm_scheduled", System.currentTimeMillis())
+                        .putString("gps_schedule_trigger", "boot_or_manual")
+                        .apply()
+                } catch (prefError: Exception) {
+                    Log.w(TAG, "Could not record GPS scheduling time: ${prefError.message}")
                 }
-            } else {
-                // Fallback: Use inexact but reliable scheduling
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: setAndAllowWhileIdle (fallback)")
-                } else {
-                    alarmManager.set(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: set (fallback Android 5-)")
-                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to schedule GPS alarm: ${e.message}")
+                throw e
             }
-            
-            Log.d(TAG, "✅ GPS alarm scheduled successfully for ${intervalMillis / 1000 / 60} minutes interval")
         }
         
-        // Schedule survival signal monitoring alarm
+        /**
+         * Schedule survival signal monitoring alarm - runs every 2 minutes
+         */
         fun scheduleSurvivalAlarm(context: Context) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            
-            Log.d(TAG, "💓 Scheduling survival signal alarm...")
-            
-            val intent = Intent(context, AlarmUpdateReceiver::class.java).apply {
-                action = ACTION_SURVIVAL_UPDATE
-            }
-            
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                SURVIVAL_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
-            val intervalMillis = 2 * 60 * 1000L // 15 minutes
-            val triggerAtMillis = SystemClock.elapsedRealtime() + intervalMillis
-            
-            Log.d(TAG, "📅 Scheduling survival alarm:")
-            Log.d(TAG, "  - Current time: ${System.currentTimeMillis()}")
-            Log.d(TAG, "  - Trigger at (elapsed): $triggerAtMillis")
-            Log.d(TAG, "  - Interval: ${intervalMillis / 1000} seconds")
-            
-            // Use the most aggressive scheduling available for survival monitoring
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    // Android 12+ with exact alarm permission
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: setExactAndAllowWhileIdle (Android 12+)")
-                } else {
-                    // Fallback: Use inexact but more reliable for survival monitoring
-                    Log.w(TAG, "❌ Exact alarms not permitted, using setAndAllowWhileIdle")
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMillis,
-                        pendingIntent
-                    )
-                    Log.d(TAG, "  - Using: setAndAllowWhileIdle (fallback)")
+            try {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                
+                Log.d(TAG, "💓 Scheduling survival alarm with 2-minute interval")
+                
+                val intent = Intent(context, AlarmUpdateReceiver::class.java).apply {
+                    action = ACTION_SURVIVAL_UPDATE
                 }
-            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                // Android 6-11: Use setExactAndAllowWhileIdle for doze mode bypass
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent
-                )
-                Log.d(TAG, "  - Using: setExactAndAllowWhileIdle (Android 6-11)")
-            } else {
-                // Android 5 and below
-                alarmManager.setExact(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent
-                )
-                Log.d(TAG, "  - Using: setExact (Android 5-)")
+                
+                val pendingIntent = createPendingIntent(context, SURVIVAL_REQUEST_CODE, intent)
+                val triggerAtMillis = SystemClock.elapsedRealtime() + INTERVAL_MILLIS
+                
+                scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent, "Survival")
+                
+                Log.d(TAG, "✅ Survival alarm scheduled for ${INTERVAL_MILLIS / 1000 / 60} minutes")
+                
+                // Record scheduling time for debugging
+                try {
+                    val miuiPrefs = context.getSharedPreferences("MiuiAlarmPrefs", Context.MODE_PRIVATE)
+                    miuiPrefs.edit()
+                        .putLong("last_survival_alarm_scheduled", System.currentTimeMillis())
+                        .putString("survival_schedule_trigger", "boot_or_manual")
+                        .apply()
+                } catch (prefError: Exception) {
+                    Log.w(TAG, "Could not record survival scheduling time: ${prefError.message}")
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to schedule survival alarm: ${e.message}")
+                throw e
             }
-            
-            Log.d(TAG, "✅ Survival signal alarm scheduled successfully for ${intervalMillis / 1000 / 60} minutes interval")
         }
         
-        // Smart alarm scheduling - RESTORED: Uses reliable AlarmManager approach
+        /**
+         * Schedule both alarms after device boot - SIMPLIFIED FOR BOOT RELIABILITY
+         */
         fun scheduleAlarms(context: Context) {
-            val locationEnabled = isLocationTrackingEnabled(context)
-            val survivalEnabled = isSurvivalSignalEnabled(context)
+            Log.d(TAG, "🚀 BOOT: Scheduling alarms after device boot")
             
-            Log.d(TAG, "🔄 Smart alarm scheduling - GPS: $locationEnabled, Survival: $survivalEnabled")
-            
-            if (locationEnabled) {
-                // RESTORED: Use proven GPS alarm approach that survives app termination
-                Log.d(TAG, "🌍 Scheduling GPS location alarm (reliable AlarmManager approach)")
+            try {
+                // CRITICAL FIX: Always schedule both alarms after boot regardless of preferences
+                // This ensures monitoring is restored even if SharedPreferences aren't immediately available
+                // The individual alarm handlers will check preferences before executing
+                
+                Log.d(TAG, "📍 BOOT: Force-scheduling GPS alarm (will check preferences during execution)")
                 scheduleGpsAlarm(context)
-            }
-            
-            if (survivalEnabled) {
+                
+                Log.d(TAG, "💓 BOOT: Force-scheduling survival alarm (will check preferences during execution)")
                 scheduleSurvivalAlarm(context)
-            }
-            
-            if (!locationEnabled && !survivalEnabled) {
-                Log.d(TAG, "⚠️ No services enabled - no GPS or survival alarms")
+                
+                Log.d(TAG, "✅ BOOT: Both alarms scheduled - they will self-check preferences during execution")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ BOOT: Error scheduling alarms after boot: ${e.message}")
+                // Don't give up - try individual scheduling
+                try {
+                    Log.d(TAG, "🔄 BOOT: Trying individual alarm scheduling as fallback...")
+                    scheduleGpsAlarm(context)
+                } catch (gpsError: Exception) {
+                    Log.e(TAG, "❌ BOOT: GPS alarm fallback failed: ${gpsError.message}")
+                }
+                
+                try {
+                    scheduleSurvivalAlarm(context)
+                } catch (survivalError: Exception) {
+                    Log.e(TAG, "❌ BOOT: Survival alarm fallback failed: ${survivalError.message}")
+                }
             }
         }
         
-        // Cancel GPS alarm only
+        /**
+         * Cancel GPS alarm
+         */
         fun cancelGpsAlarm(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             
@@ -207,18 +152,15 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 action = ACTION_GPS_UPDATE
             }
             
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                GPS_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
+            val pendingIntent = createPendingIntent(context, GPS_REQUEST_CODE, intent)
             alarmManager.cancel(pendingIntent)
+            
             Log.d(TAG, "❌ GPS alarm cancelled")
         }
         
-        // Cancel survival signal alarm only
+        /**
+         * Cancel survival signal alarm
+         */
         fun cancelSurvivalAlarm(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             
@@ -226,110 +168,153 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 action = ACTION_SURVIVAL_UPDATE
             }
             
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                SURVIVAL_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            
+            val pendingIntent = createPendingIntent(context, SURVIVAL_REQUEST_CODE, intent)
             alarmManager.cancel(pendingIntent)
-            Log.d(TAG, "❌ Survival signal alarm cancelled")
+            
+            Log.d(TAG, "❌ Survival alarm cancelled")
         }
         
-        // Cancel all alarms (for compatibility)
+        /**
+         * Cancel all alarms
+         */
         fun cancelAlarms(context: Context) {
             Log.d(TAG, "❌ Cancelling all alarms")
             cancelGpsAlarm(context)
             cancelSurvivalAlarm(context)
         }
         
-        // Enable GPS tracking - RESTORED: Uses proven alarm approach
+        /**
+         * Enable GPS tracking and start alarms
+         */
         fun enableLocationTracking(context: Context) {
-            Log.d(TAG, "🌍 Enabling GPS location tracking (alarm-based approach)")
+            Log.d(TAG, "🌍 Enabling GPS location tracking")
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("flutter.location_tracking_enabled", true).apply()
             
-            // CRITICAL FIX: Cancel any existing alarm first to avoid duplicates
-            cancelGpsAlarm(context)
-            
-            // RESTORED: Use proven GPS alarm approach that survives app termination
-            Log.d(TAG, "🚀 Scheduling GPS alarm for reliable tracking")
+            cancelGpsAlarm(context) // Cancel existing alarm to avoid duplicates
             scheduleGpsAlarm(context)
-            Log.d(TAG, "✅ GPS alarm scheduled - survives app termination!")
+            
+            Log.d(TAG, "✅ GPS tracking enabled with 2-minute intervals")
         }
         
-        // Disable GPS tracking - RESTORED: Cancels GPS alarms
+        /**
+         * Disable GPS tracking and stop alarms
+         */
         fun disableLocationTracking(context: Context) {
-            Log.d(TAG, "🌍 Disabling GPS location tracking (cancelling alarms)")
+            Log.d(TAG, "🌍 Disabling GPS location tracking")
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("flutter.location_tracking_enabled", false).apply()
             
-            // Cancel GPS alarms
             cancelGpsAlarm(context)
-            Log.d(TAG, "❌ GPS tracking fully disabled (alarms cancelled)")
+            
+            Log.d(TAG, "❌ GPS tracking disabled")
         }
         
-        // Enable survival signal monitoring
+        /**
+         * Enable survival monitoring and start alarms
+         */
         fun enableSurvivalMonitoring(context: Context) {
-            Log.d(TAG, "💓💓💓 ENABLING SURVIVAL SIGNAL MONITORING")
+            Log.d(TAG, "💓 Enabling survival signal monitoring")
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            
-            // Save the setting
             prefs.edit().putBoolean("flutter.survival_signal_enabled", true).apply()
-            Log.d(TAG, "✅ Saved flutter.survival_signal_enabled = true to SharedPreferences")
             
-            // Initialize screen state for unlock detection
+            // Initialize screen state tracking
             val currentScreenState = isScreenOn(context)
             setLastScreenState(context, currentScreenState)
-            Log.d(TAG, "🔄 Initialized screen state tracking - Current state: ${if (currentScreenState) "ON" else "OFF"}")
             
-            // Verify the setting was saved
-            val verifyEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
-            Log.d(TAG, "🔍 Verification: flutter.survival_signal_enabled = $verifyEnabled")
-            
-            // CRITICAL FIX: Cancel any existing alarm first to avoid duplicates
-            cancelSurvivalAlarm(context)
-            Log.d(TAG, "❌ Cancelled any existing survival signal alarms")
-            
-            // Start the initial alarm
-            Log.d(TAG, "🚀 Starting initial survival signal alarm...")
+            cancelSurvivalAlarm(context) // Cancel existing alarm to avoid duplicates
             scheduleSurvivalAlarm(context)
-            Log.d(TAG, "✅ Initial survival signal alarm scheduled - monitoring will start in 15 minutes")
+            
+            Log.d(TAG, "✅ Survival monitoring enabled with 2-minute intervals")
         }
         
-        // Disable survival signal monitoring
+        /**
+         * Disable survival monitoring and stop alarms
+         */
         fun disableSurvivalMonitoring(context: Context) {
             Log.d(TAG, "💓 Disabling survival signal monitoring")
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("flutter.survival_signal_enabled", false).apply()
+            
             cancelSurvivalAlarm(context)
+            
+            Log.d(TAG, "❌ Survival monitoring disabled")
         }
         
-        // Check if location tracking is enabled
+        // Helper methods
+        
+        private fun createPendingIntent(context: Context, requestCode: Int, intent: Intent): PendingIntent {
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            
+            return PendingIntent.getBroadcast(context, requestCode, intent, flags)
+        }
+        
+        private fun scheduleAlarmWithBestMethod(
+            alarmManager: AlarmManager,
+            triggerAtMillis: Long,
+            pendingIntent: PendingIntent,
+            type: String
+        ) {
+            try {
+                when {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                        if (alarmManager.canScheduleExactAlarms()) {
+                            alarmManager.setExactAndAllowWhileIdle(
+                                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                                triggerAtMillis,
+                                pendingIntent
+                            )
+                            Log.d(TAG, "$type alarm: Using setExactAndAllowWhileIdle (Android 12+)")
+                        } else {
+                            alarmManager.setAndAllowWhileIdle(
+                                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                                triggerAtMillis,
+                                pendingIntent
+                            )
+                            Log.d(TAG, "$type alarm: Using setAndAllowWhileIdle (fallback)")
+                        }
+                    }
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                        alarmManager.setExactAndAllowWhileIdle(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            triggerAtMillis,
+                            pendingIntent
+                        )
+                        Log.d(TAG, "$type alarm: Using setExactAndAllowWhileIdle (Android 6+)")
+                    }
+                    else -> {
+                        alarmManager.setExact(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            triggerAtMillis,
+                            pendingIntent
+                        )
+                        Log.d(TAG, "$type alarm: Using setExact")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to schedule $type alarm: ${e.message}")
+                throw e
+            }
+        }
+        
         private fun isLocationTrackingEnabled(context: Context): Boolean {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             return prefs.getBoolean("flutter.location_tracking_enabled", false)
         }
         
-        // Check if survival signal is enabled
         private fun isSurvivalSignalEnabled(context: Context): Boolean {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val isEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
-            Log.d(TAG, "🔍 SharedPreferences check: flutter.survival_signal_enabled = $isEnabled")
-            
-            // Debug: Show all survival-related keys
-            val allKeys = prefs.all.filterKeys { it.contains("survival") }
-            Log.d(TAG, "🔍 All survival keys in SharedPreferences: $allKeys")
-            
-            return isEnabled
+            return prefs.getBoolean("flutter.survival_signal_enabled", false)
         }
         
-        // Check if screen is currently ON
         private fun isScreenOn(context: Context): Boolean {
             return try {
                 val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT_WATCH) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
                     powerManager.isInteractive
                 } else {
                     @Suppress("DEPRECATION")
@@ -341,7 +326,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             }
         }
         
-        // Track last known screen state to detect unlock events
         private fun getLastScreenState(context: Context): Boolean {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             return prefs.getBoolean("flutter.last_screen_state", false)
@@ -351,51 +335,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("flutter.last_screen_state", isOn).apply()
         }
-        
-        // CRITICAL FIX: Validate all location permissions are granted
-        private fun validateLocationPermissions(context: Context): Boolean {
-            val fineLocation = ActivityCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            
-            val coarseLocation = ActivityCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            
-            val backgroundLocation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                ActivityCompat.checkSelfPermission(
-                    context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true // Not required for API < 29
-            }
-            
-            Log.d(TAG, "📍 Location permissions check:")
-            Log.d(TAG, "  - Fine location: $fineLocation")
-            Log.d(TAG, "  - Coarse location: $coarseLocation") 
-            Log.d(TAG, "  - Background location: $backgroundLocation")
-            
-            val allGranted = fineLocation && coarseLocation && backgroundLocation
-            Log.d(TAG, "  - All permissions granted: $allGranted")
-            
-            return allGranted
-        }
-        
-        // CRITICAL FIX: Check if device location service is enabled
-        private fun isLocationServiceEnabled(context: Context): Boolean {
-            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-            
-            Log.d(TAG, "📍 Location services check:")
-            Log.d(TAG, "  - GPS provider enabled: $gpsEnabled")
-            Log.d(TAG, "  - Network provider enabled: $networkEnabled")
-            
-            val anyEnabled = gpsEnabled || networkEnabled
-            Log.d(TAG, "  - Any location service enabled: $anyEnabled")
-            
-            return anyEnabled
-        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -403,7 +342,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         
         when (intent.action) {
             ACTION_GPS_UPDATE -> {
-                // RESTORED: GPS alarm handling - this is the reliable approach
                 handleGpsUpdate(context)
             }
             ACTION_SURVIVAL_UPDATE -> {
@@ -416,57 +354,70 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
     }
     
     private fun handleGpsUpdate(context: Context) {
-        Log.d(TAG, "🌍 GPS ALARM TRIGGERED - Handling GPS location update")
+        Log.d(TAG, "🌍 GPS alarm triggered - 2-minute check")
         
-        // Check if GPS is still enabled
-        if (!isLocationTrackingEnabled(context)) {
+        // Check if GPS tracking is still enabled - ENHANCED WITH FALLBACK
+        val locationEnabled = try {
+            isLocationTrackingEnabled(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ Could not check GPS preferences, defaulting to enabled: ${e.message}")
+            true // Default to enabled if we can't check preferences
+        }
+        
+        if (!locationEnabled) {
             Log.d(TAG, "⚠️ GPS tracking disabled, skipping update")
             return
         }
         
-        // CRITICAL FIX: Re-validate permissions at runtime (they can be revoked)
-        if (!validateLocationPermissions(context)) {
-            Log.e(TAG, "❌ GPS update failed: Location permissions were revoked")
-            Log.e(TAG, "💡 GPS tracking will stop until permissions are restored")
-            return
-        }
-        
-        // Check if location services are available
-        if (!isLocationServiceEnabled(context)) {
-            Log.w(TAG, "⚠️ Location services are disabled, GPS update may fail")
-        }
-        
-        Log.d(TAG, "✅ GPS tracking is enabled and permissions validated, proceeding with location update")
+        Log.d(TAG, "✅ GPS tracking enabled, updating location")
         
         try {
-            // Update Firebase with GPS location
             updateFirebaseWithLocation(context)
             
-            // Schedule next GPS alarm
-            scheduleGpsAlarm(context)
-            Log.d(TAG, "🔄 Next GPS alarm scheduled for 2 minutes")
+            // Record execution time for debugging
+            try {
+                val miuiPrefs = context.getSharedPreferences("MiuiAlarmPrefs", Context.MODE_PRIVATE)
+                miuiPrefs.edit()
+                    .putLong("last_gps_execution", System.currentTimeMillis())
+                    .apply()
+                Log.d(TAG, "📝 GPS execution time recorded")
+            } catch (prefError: Exception) {
+                Log.w(TAG, "Could not record GPS execution time: ${prefError.message}")
+            }
             
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error in GPS update: ${e.message}")
-            // Still schedule next update even if this one failed
+            Log.e(TAG, "❌ Error updating GPS location: ${e.message}")
+        }
+        
+        // Schedule next GPS alarm
+        try {
             scheduleGpsAlarm(context)
-            Log.d(TAG, "🔄 Next GPS alarm scheduled despite error")
+            Log.d(TAG, "🔄 Next GPS alarm scheduled")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to schedule next GPS alarm: ${e.message}")
         }
     }
     
     private fun handleSurvivalUpdate(context: Context) {
-        Log.d(TAG, "💓💓💓 SURVIVAL ALARM TRIGGERED - 15-minute check")
+        Log.d(TAG, "💓 Survival alarm triggered - 2-minute check")
         
-        // Check if survival signal is still enabled
-        if (!isSurvivalSignalEnabled(context)) {
-            Log.d(TAG, "⚠️ Survival signal disabled, skipping update and NOT scheduling next alarm")
+        // Check if survival signal is still enabled - ENHANCED WITH FALLBACK
+        val survivalEnabled = try {
+            isSurvivalSignalEnabled(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ Could not check survival preferences, defaulting to enabled: ${e.message}")
+            true // Default to enabled if we can't check preferences
+        }
+        
+        if (!survivalEnabled) {
+            Log.d(TAG, "⚠️ Survival signal disabled, skipping update")
             return
         }
         
-        Log.d(TAG, "✅ Survival signal enabled, proceeding with 15-minute check")
+        Log.d(TAG, "✅ Survival signal enabled, checking screen state")
         
         try {
-            // Check current screen state
+            // Check screen state for unlock detection
             val isScreenCurrentlyOn = isScreenOn(context)
             val wasScreenOn = getLastScreenState(context)
             
@@ -474,113 +425,74 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             
             // Detect unlock event: screen went from OFF to ON
             if (isScreenCurrentlyOn && !wasScreenOn) {
-                Log.d(TAG, "🔓🔓🔓 UNLOCK DETECTED - Screen went from OFF to ON!")
-                Log.d(TAG, "⚡ This simulates the immediate unlock detection that failed when app was killed")
+                Log.d(TAG, "🔓 UNLOCK DETECTED - Screen went from OFF to ON!")
                 updateFirebaseWithSurvivalStatus(context, "unlock_detected")
             } else if (isScreenCurrentlyOn) {
-                Log.d(TAG, "✅ Screen ON (continued usage) - Updating Firebase")
+                Log.d(TAG, "✅ Screen ON (continued usage)")
                 updateFirebaseWithSurvivalStatus(context, "active")
             } else {
-                Log.d(TAG, "📱 Screen OFF - NOT updating Firebase (keeps last timestamp)")
+                Log.d(TAG, "📱 Screen OFF - keeping last timestamp")
             }
             
             // Update stored screen state for next check
             setLastScreenState(context, isScreenCurrentlyOn)
             
+            // Record execution time for debugging
+            try {
+                val miuiPrefs = context.getSharedPreferences("MiuiAlarmPrefs", Context.MODE_PRIVATE)
+                miuiPrefs.edit()
+                    .putLong("last_survival_execution", System.currentTimeMillis())
+                    .apply()
+                Log.d(TAG, "📝 Survival execution time recorded")
+            } catch (prefError: Exception) {
+                Log.w(TAG, "Could not record survival execution time: ${prefError.message}")
+            }
+            
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in survival signal update: ${e.message}")
         }
         
-        // ALWAYS schedule next alarm (like GPS) - runs every 15 minutes regardless
+        // Schedule next survival alarm
         try {
             scheduleSurvivalAlarm(context)
-            Log.d(TAG, "🔄 Next 15-minute alarm scheduled")
+            Log.d(TAG, "🔄 Next survival alarm scheduled")
         } catch (e: Exception) {
-            Log.e(TAG, "❌ CRITICAL: Failed to schedule next 15-minute alarm: ${e.message}")
+            Log.e(TAG, "❌ Failed to schedule next survival alarm: ${e.message}")
         }
     }
     
     private fun updateFirebaseWithLocation(context: Context) {
-        // CRITICAL FIX: Add comprehensive startup validation
-        Log.d(TAG, "🔍 GPS Update - Performing startup validation...")
+        Log.d(TAG, "🔍 Updating Firebase with GPS location")
         
         // Get family ID
         val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val familyId = prefs.getString("flutter.family_id", null)
-        
-        // DEBUG: List all keys to debug SharedPreferences issue
-        val allKeys = prefs.all
-        Log.d(TAG, "🔍 All SharedPreferences keys: $allKeys")
-        Log.d(TAG, "🔍 Looking for flutter.family_id: $familyId")
-        
-        // CRITICAL DEBUG: Try different key variations to find the actual key
-        val testKeys = listOf("flutter.family_id", "family_id", "flutter.flutter.family_id")
-        for (testKey in testKeys) {
-            val testValue = prefs.getString(testKey, null)
-            Log.d(TAG, "🧪 Test key '$testKey': $testValue")
-        }
-        
-        // CRITICAL DEBUG: Check if key exists in different ways
-        val keyExists = prefs.contains("flutter.family_id")
-        Log.d(TAG, "🔍 Key 'flutter.family_id' exists: $keyExists")
-        
-        // CRITICAL DEBUG: Try to get the exact key from the all keys map
-        val exactValue = allKeys["flutter.family_id"]
-        Log.d(TAG, "🔍 Direct map access allKeys['flutter.family_id']: $exactValue")
-        
-        // CRITICAL FIX: Enhanced debug logging to verify the key fix
-        if (familyId != null) {
-            Log.d(TAG, "✅ FIXED: Successfully retrieved family_id from SharedPreferences: $familyId")
-        } else {
-            Log.e(TAG, "❌ STILL NULL: family_id not found - checking all family-related keys...")
-            val familyKeys = prefs.all.filterKeys { it.contains("family") }
-            Log.e(TAG, "🔍 All family-related keys: $familyKeys")
-        }
+        val familyId = prefs.getString("flutter.family_id", null) 
+            ?: prefs.getString("family_id", null)
         
         if (familyId.isNullOrEmpty()) {
             Log.e(TAG, "❌ No family ID found for GPS update")
             return
         }
         
-        // CRITICAL FIX: Verify location tracking is still enabled (could be disabled during reboot)
-        val locationTrackingEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
-        if (!locationTrackingEnabled) {
-            Log.w(TAG, "⚠️ Location tracking was disabled during reboot - cancelling GPS alarms")
-            cancelGpsAlarm(context)
-            return
-        }
-        
         Log.d(TAG, "📍 Getting GPS location for family: $familyId")
-        Log.d(TAG, "✅ Location tracking confirmed enabled after reboot")
         
         try {
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
             
-            // CRITICAL FIX: Enhanced permission checking with detailed logging
-            val fineLocationGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            val coarseLocationGranted = ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            val backgroundLocationGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true // Not required on Android 9 and below
-            }
+            // Check location permissions
+            val hasLocationPermission = ActivityCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED ||
+            ActivityCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
             
-            Log.d(TAG, "🔐 Location permissions status:")
-            Log.d(TAG, "  - Fine location: $fineLocationGranted")
-            Log.d(TAG, "  - Coarse location: $coarseLocationGranted")
-            Log.d(TAG, "  - Background location: $backgroundLocationGranted (required for Android 10+)")
-            
-            if (!fineLocationGranted && !coarseLocationGranted) {
-                Log.e(TAG, "❌ No location permissions granted - cannot get GPS location")
+            if (!hasLocationPermission) {
+                Log.d(TAG, "⚠️ No location permissions - skipping GPS update")
                 return
             }
             
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !backgroundLocationGranted) {
-                Log.w(TAG, "⚠️ Background location permission not granted - may not work after reboot on Android 10+")
-                // Continue anyway - some devices may still work
-            }
-            
-            // Try to get last known location from GPS provider
+            // Get last known location
             var location: Location? = null
             
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
@@ -588,16 +500,15 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 Log.d(TAG, "📡 GPS provider location: $location")
             }
             
-            // Fallback to network provider
             if (location == null && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 Log.d(TAG, "📶 Network provider location: $location")
             }
             
-            // Update Firebase with location data
-            val db = FirebaseFirestore.getInstance()
-            
+            // Update Firebase
             if (location != null) {
+                val db = FirebaseFirestore.getInstance()
+                
                 val locationData = mapOf(
                     "latitude" to location.latitude,
                     "longitude" to location.longitude,
@@ -608,9 +519,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                     "altitude" to if (location.hasAltitude()) location.altitude else null
                 )
                 
-                val data = mapOf(
-                    "location" to locationData  // Keep original structure - just location field
-                )
+                val data = mapOf("location" to locationData)
                 
                 db.collection("families").document(familyId)
                     .update(data)
@@ -619,15 +528,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                     }
                     .addOnFailureListener { e ->
                         Log.e(TAG, "❌ GPS Firebase update failed: ${e.message}")
-                        
-                        // CRITICAL FIX: Add retry mechanism for Firebase connectivity issues during boot
-                        if (e.message?.contains("network") == true || e.message?.contains("unavailable") == true) {
-                            Log.d(TAG, "🔄 GPS: Network/Firebase not ready, scheduling retry in 30 seconds...")
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                // Retry GPS update
-                                updateFirebaseWithLocation(context)
-                            }, 30000)
-                        }
                     }
             } else {
                 Log.d(TAG, "⚠️ No location available - skipping Firebase update")
@@ -635,7 +535,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error getting GPS location: ${e.message}")
-            // Don't update Firebase on error - keep original behavior
         }
     }
     
@@ -643,30 +542,19 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         // Get family ID
         val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val familyId = prefs.getString("flutter.family_id", null)
-        
-        // CRITICAL FIX: Enhanced debug logging to verify the key fix
-        if (familyId != null) {
-            Log.d(TAG, "✅ FIXED: Successfully retrieved family_id for survival signal: $familyId")
-        } else {
-            Log.e(TAG, "❌ STILL NULL: family_id not found for survival signal - checking all family-related keys...")
-            val familyKeys = prefs.all.filterKeys { it.contains("family") }
-            Log.e(TAG, "🔍 All family-related keys: $familyKeys")
-        }
+            ?: prefs.getString("family_id", null)
         
         if (familyId.isNullOrEmpty()) {
             Log.e(TAG, "❌ No family ID found for survival signal update")
             return
         }
         
-        Log.d(TAG, "🔥 Updating Firebase with original structure for family: $familyId")
+        Log.d(TAG, "🔥 Updating Firebase survival signal for family: $familyId")
         
         try {
             val db = FirebaseFirestore.getInstance()
             
-            // Keep original structure - just update lastPhoneActivity
-            val data = mapOf(
-                "lastPhoneActivity" to FieldValue.serverTimestamp()
-            )
+            val data = mapOf("lastPhoneActivity" to FieldValue.serverTimestamp())
             
             db.collection("families").document(familyId)
                 .update(data)
@@ -675,19 +563,10 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 }
                 .addOnFailureListener { e ->
                     Log.e(TAG, "❌ Survival signal Firebase update failed: ${e.message}")
-                    
-                    // CRITICAL FIX: Add retry mechanism for Firebase connectivity issues during boot
-                    if (e.message?.contains("network") == true || e.message?.contains("unavailable") == true) {
-                        Log.d(TAG, "🔄 Network/Firebase not ready, scheduling retry in 30 seconds...")
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            updateFirebaseWithSurvivalStatus(context, status)
-                        }, 30000)
-                    }
                 }
                 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Critical error in Firebase update: ${e.message}")
-            // Don't crash - survival monitoring should continue
+            Log.e(TAG, "❌ Critical error in Firebase survival update: ${e.message}")
         }
     }
 }

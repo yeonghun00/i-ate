@@ -263,7 +263,12 @@ class GpsTrackingService : Service() {
     private fun updateFirebaseWithLocation(location: Location) {
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val familyId = prefs.getString("flutter.family_id", null)
+            // CRITICAL FIX: Try both key variations for maximum compatibility
+            var familyId = prefs.getString("flutter.family_id", null)
+            if (familyId == null) {
+                familyId = prefs.getString("family_id", null)
+                Log.d(TAG, "🔄 Using fallback key 'family_id': $familyId")
+            }
             
             if (familyId.isNullOrEmpty()) {
                 Log.w(TAG, "⚠️ No family ID found, skipping Firebase update")
