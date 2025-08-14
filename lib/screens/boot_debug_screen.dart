@@ -10,7 +10,9 @@ class BootDebugScreen extends StatefulWidget {
 
 class _BootDebugScreenState extends State<BootDebugScreen> {
   static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
+  static const MethodChannel _debugChannel = MethodChannel('com.thousandemfla.thanks_everyday/alarm_debug');
   String _logContent = 'Loading...';
+  String _debugStatus = 'Loading...';
   bool _isLoading = true;
 
   @override
@@ -25,16 +27,45 @@ class _BootDebugScreenState extends State<BootDebugScreen> {
         _isLoading = true;
       });
       
-      final String result = await _channel.invokeMethod('getBootDebugLog');
+      // Load both debug status and boot log
+      final String bootLog = await _channel.invokeMethod('getBootDebugLog');
+      final String debugStatus = await _debugChannel.invokeMethod('getDebugStatus');
+      
       setState(() {
-        _logContent = result;
+        _logContent = bootLog;
+        _debugStatus = debugStatus;
         _isLoading = false;
       });
     } on PlatformException catch (e) {
       setState(() {
         _logContent = 'Error loading boot log: ${e.message}';
+        _debugStatus = 'Error loading debug status: ${e.message}';
         _isLoading = false;
       });
+    }
+  }
+  
+  Future<void> _forceRestartServices() async {
+    try {
+      await _debugChannel.invokeMethod('forceRestartAllServices');
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ 강제 재시작 완료! 30초 후 로그를 확인하세요.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      
+      // Refresh after restart
+      Future.delayed(const Duration(seconds: 3), _loadBootLog);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ 재시작 실패: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -58,6 +89,11 @@ class _BootDebugScreenState extends State<BootDebugScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _loadBootLog,
             tooltip: 'Refresh Log',
+          ),
+          IconButton(
+            icon: const Icon(Icons.restart_alt),
+            onPressed: _forceRestartServices,
+            tooltip: 'Force Restart Services',
           ),
         ],
       ),
@@ -114,11 +150,89 @@ class _BootDebugScreenState extends State<BootDebugScreen> {
                             '1. GPS와 생존 신호를 활성화하세요\n'
                             '2. 기기를 재부팅하세요\n'
                             '3. 재부팅 후 이 화면을 확인하세요\n'
-                            '4. 로그가 나타나면 BootReceiver가 작동 중입니다',
+                            '4. 문제가 있으면 "강제 재시작" 버튼을 누르세요',
                             style: TextStyle(
                               fontSize: 14,
                               color: Color(0xFF374151),
                               height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _forceRestartServices,
+                              icon: const Icon(Icons.restart_alt),
+                              label: const Text('🔄 강제 재시작'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Debug Status Card
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.analytics, color: Color(0xFF3B82F6), size: 20),
+                              const SizedBox(width: 8),
+                              const Text(
+                                '현재 상태',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF3B82F6),
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                'Live Status',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Text(
+                              _debugStatus,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: Color(0xFF374151),
+                                height: 1.4,
+                              ),
                             ),
                           ),
                         ],

@@ -95,12 +95,8 @@
         <service 
             android:name=".elder.ScreenMonitorService"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property 
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="explanation" />
-        </service>
+            android:exported="false" />
+            <!-- specialUse 제거: 일반 앱에서는 포그라운드 서비스 시작 실패 가능성 -->
         
         <!-- Foreground service for reliable GPS tracking -->
         <service 

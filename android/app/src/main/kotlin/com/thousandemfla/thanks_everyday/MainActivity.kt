@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private val USAGE_DETECTOR_CHANNEL = "thanks_everyday/usage_detector"
     private val OVERLAY_CHANNEL = "overlay_service"
     private val MIUI_CHANNEL = "com.thousandemfla.thanks_everyday/miui"
+    private val DEBUG_CHANNEL = "com.thousandemfla.thanks_everyday/alarm_debug"
     private val TAG = "MainActivity"
     private val USAGE_STATS_REQUEST_CODE = 100
     private val BATTERY_OPTIMIZATION_REQUEST_CODE = 101
@@ -216,6 +217,27 @@ class MainActivity : FlutterActivity() {
                 "manualResumeMonitoring" -> {
                     manualResumeMonitoring()
                     result.success(true)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+        
+        // Debug Channel for boot and alarm troubleshooting
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEBUG_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getDebugStatus" -> {
+                    val status = AlarmUpdateReceiver.getDebugStatus(this)
+                    result.success(status)
+                }
+                "getBootLog" -> {
+                    val bootLog = getBootDebugLog()
+                    result.success(bootLog)
+                }
+                "forceRestartAllServices" -> {
+                    AlarmUpdateReceiver.forceRestartAllServices(this)
+                    result.success("Force restart initiated")
                 }
                 else -> {
                     result.notImplemented()

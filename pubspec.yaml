@@ -49,6 +49,9 @@ dependencies:
   # For FCM v1 API with Service Account
   googleapis_auth: ^1.4.1
   
+  # State Management
+  provider: ^6.0.5
+  
 
 dev_dependencies:
   flutter_test:

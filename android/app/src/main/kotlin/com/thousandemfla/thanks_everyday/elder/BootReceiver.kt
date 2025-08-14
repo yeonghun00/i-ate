@@ -4,73 +4,111 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 
 class BootReceiver : BroadcastReceiver() {
     
+    companion object {
+        private const val TAG = "BootReceiver"
+    }
+    
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) {
+            return
+        }
         
-        Log.e("BootReceiver", "RECEIVED: ${intent.action}")
+        Log.i(TAG, "🚀 BOOT COMPLETED - Starting services in 10 seconds")
         
-        // WRITE TO FILE IMMEDIATELY
+        // Simple approach: Wait 10 seconds, then start both services
+        Handler(Looper.getMainLooper()).postDelayed({
+            startServices(context)
+        }, 10000L)
+    }
+    
+    private fun startServices(context: Context) {
         try {
-            val file = java.io.File(context.filesDir, "boot_debug_log.txt")
-            val time = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-            file.appendText("[$time] ${intent.action} RECEIVED\n")
-        } catch (e: Exception) {}
-        
-        // ONLY HANDLE BOOT_COMPLETED
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            Log.e("BootReceiver", "📍 STARTING 2-MINUTE ALARMS...")
-            try {
-                val file = java.io.File(context.filesDir, "boot_debug_log.txt")
-                val time = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-                file.appendText("[$time] STARTING 2-MINUTE ALARMS...\n")
-                
-                // Use the simplified scheduleAlarms method
-                AlarmUpdateReceiver.scheduleAlarms(context)
-                
-                Log.e("BootReceiver", "✅ 2-MINUTE ALARMS SCHEDULED SUCCESSFULLY")
-                file.appendText("[$time] 2-MINUTE ALARMS SCHEDULED!\n")
-                
-            } catch (e: Exception) {
-                Log.e("BootReceiver", "❌ ALARM SCHEDULING FAILED: ${e.message}")
-                // Write alarm failure to file
-                try {
-                    val file = java.io.File(context.filesDir, "boot_debug_log.txt")
-                    val time = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-                    file.appendText("[$time] ALARM_ERROR: ${e.message}\n")
-                } catch (fileError: Exception) {
-                    // Ignore file write errors
-                }
+            Log.i(TAG, "⚡ STARTING SERVICES NOW")
+            
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            // 기본값 true로 설정 - Flutter 초기화 전에도 작동하도록
+            val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", true)
+            val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", true)
+            
+            Log.i(TAG, "Settings: Survival=$survivalEnabled, GPS=$locationEnabled")
+            
+            // CRITICAL: Start foreground service first (for notification)
+            if (survivalEnabled) {
+                Log.i(TAG, "Starting ScreenMonitorService (notification)...")
+                startScreenMonitoringService(context)
             }
             
-            Log.e("BootReceiver", "📱 STARTING SCREEN MONITOR SERVICE...")
-            try {
-                val serviceIntent = Intent(context, ScreenMonitorService::class.java)
-                if (android.os.Build.VERSION.SDK_INT >= 26) {
+            if (survivalEnabled) {
+                Log.i(TAG, "Starting survival monitoring...")
+                AlarmUpdateReceiver.enableSurvivalMonitoring(context)
+                Log.i(TAG, "✅ Survival started")
+            }
+            
+            if (locationEnabled) {
+                Log.i(TAG, "🌍 Starting GPS tracking (service + alarm)...")
+                try {
+                    // ★ 핵심 수정: 포그라운드 서비스 먼저 시작
+                    try {
+                        GpsTrackingService.startService(context)
+                        Log.i(TAG, "✅ GpsTrackingService started successfully")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ Could not start GpsTrackingService: ${e.message}")
+                    }
+                    
+                    // 백업용 알람도 스케줄
+                    AlarmUpdateReceiver.enableLocationTracking(context)
+                    Log.i(TAG, "✅ GPS alarm scheduled as backup")
+                    
+                    // Verify it was actually scheduled
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        val debugPrefs = context.getSharedPreferences("AlarmDebugPrefs", Context.MODE_PRIVATE)
+                        val lastScheduled = debugPrefs.getLong("last_gps_alarm_scheduled", 0)
+                        if (lastScheduled > 0) {
+                            Log.i(TAG, "✅ GPS service + alarm successfully started at boot")
+                        } else {
+                            Log.e(TAG, "❌ GPS alarm NOT scheduled at boot - FAILED")
+                        }
+                    }, 3000)
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ FAILED to start GPS tracking: ${e.message}", e)
+                }
+            } else {
+                Log.w(TAG, "⚠️ GPS tracking is DISABLED in settings - not starting")
+            }
+            
+            Log.i(TAG, "🎉 BOOT SERVICES COMPLETED")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Boot service error: ${e.message}", e)
+        }
+    }
+    
+    private fun startScreenMonitoringService(context: Context) {
+        try {
+            Log.i(TAG, "🔧 Starting ScreenMonitorService...")
+            
+            val serviceIntent = Intent(context, ScreenMonitorService::class.java)
+            serviceIntent.putExtra("start_source", "boot_receiver")
+            
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                try {
                     context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
+                    Log.i(TAG, "✅ ScreenMonitorService started")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Could not start foreground service: ${e.message}")
                 }
-                Log.e("BootReceiver", "✅ SCREEN MONITOR SERVICE STARTED")
-                
-                val file = java.io.File(context.filesDir, "boot_debug_log.txt")
-                val time = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-                file.appendText("[$time] SERVICE STARTED!\n")
-                
-            } catch (e: Exception) {
-                Log.e("BootReceiver", "❌ SERVICE START FAILED: ${e.message}")
-                // Write service failure to file
-                try {
-                    val file = java.io.File(context.filesDir, "boot_debug_log.txt")
-                    val time = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
-                    file.appendText("[$time] SERVICE_ERROR: ${e.message}\n")
-                } catch (fileError: Exception) {
-                    // Ignore file write errors
-                }
+            } else {
+                context.startService(serviceIntent)
+                Log.i(TAG, "✅ ScreenMonitorService started (legacy)")
             }
-            
-            Log.e("BootReceiver", "🔥 BOOT INITIALIZATION COMPLETE")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error starting ScreenMonitorService: ${e.message}")
         }
     }
 }

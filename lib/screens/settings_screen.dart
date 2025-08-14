@@ -360,6 +360,29 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
               const SizedBox(height: 30),
 
+              // Debug Section
+              _buildSection(
+                title: '개발자 도구',
+                children: [
+                  _buildActionButton(
+                    icon: Icons.bug_report,
+                    title: '부팅 디버그',
+                    subtitle: '재부팅 후 GPS/생존신호 작동 상태 확인',
+                    color: const Color(0xFF3B82F6),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const BootDebugScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 30),
+
               // Account Actions Section
               _buildSection(
                 title: '계정 관리',
