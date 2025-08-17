@@ -13,7 +13,6 @@ import 'package:thanks_everyday/services/overlay_service.dart';
 import 'package:thanks_everyday/services/miui_boot_helper.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
-import 'package:thanks_everyday/screens/boot_debug_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
@@ -352,7 +351,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _updateActivityInFirebase() async {
     try {
-      // Update phone activity to Firebase immediately when app becomes active
       await _firebaseService.updatePhoneActivity();
       print('App is active - phone activity updated in Firebase');
     } catch (e) {
@@ -373,7 +371,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadMealData() async {
     try {
-      // Only load last meal time, count comes from Firebase
       _lastMealTime = await FoodTrackingService.getLastFoodIntake();
       setState(() {});
     } catch (e) {
@@ -385,14 +382,9 @@ class _HomePageState extends State<HomePage> {
     try {
       print('🔧 Starting service initialization...');
       
-      // Debug: Check what's actually happening
       final prefs = await SharedPreferences.getInstance();
       final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
       final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
-      
-      print('🔍 DEBUG Settings:');
-      print('  - survival_signal_enabled: $survivalEnabled');
-      print('  - location_tracking_enabled: $locationEnabled');
       
       print('🔧 Initializing ScreenMonitorService...');
       await ScreenMonitorService.initialize();
@@ -406,12 +398,10 @@ class _HomePageState extends State<HomePage> {
         await ScreenMonitorService.enableSurvivalSignal();
         print('✅ Survival signal enabled');
         
-        // EXPLICITLY start WorkManager for background updates
         print('🔄 Starting WorkManager for background updates...');
-        await ScreenMonitorService.startMonitoring(); // This schedules WorkManager
+        await ScreenMonitorService.startMonitoring();
         print('✅ WorkManager scheduled for 15-minute updates');
         
-        // Native service will handle background Firebase updates
         print('✅ Background phone activity monitoring started');
       } else {
         print('❌ Survival signal is disabled in preferences');
@@ -421,7 +411,6 @@ class _HomePageState extends State<HomePage> {
         await LocationService.setLocationTrackingEnabled(true);
         print('✅ Location tracking started');
         
-        // Force immediate location update
         print('📍 Getting immediate location...');
         final position = await LocationService.getCurrentLocation();
         if (position != null) {
@@ -432,50 +421,6 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       print('❌ Service initialization failed: $e');
-    }
-  }
-  
-  Future<void> _debugPermissions() async {
-    print('🔍 Checking permissions...');
-    
-    try {
-      final hasPermissions = await ScreenMonitorService.checkPermissions();
-      final hasUsageStats = await ScreenMonitorService.checkUsageStatsPermission();
-      final hasBattery = await ScreenMonitorService.checkBatteryOptimization();
-      
-      print('  - All permissions: $hasPermissions');
-      print('  - Usage stats: $hasUsageStats');
-      print('  - Battery optimization: $hasBattery');
-    } catch (e) {
-      print('❌ Permission check failed: $e');
-    }
-  }
-  
-  Future<void> _manualServiceTest() async {
-    print('🚨 MANUAL SERVICE START TEST');
-    try {
-      print('Step 1: Initialize ScreenMonitorService');
-      await ScreenMonitorService.initialize();
-      print('✅ ScreenMonitorService initialized');
-      
-      print('Step 2: Check permissions');
-      final hasPermissions = await ScreenMonitorService.checkPermissions();
-      print('Permissions granted: $hasPermissions');
-      
-      if (!hasPermissions) {
-        print('Step 3: Request permissions');
-        await ScreenMonitorService.requestPermissions();
-      }
-      
-      print('Step 4: Enable survival signal');
-      await ScreenMonitorService.enableSurvivalSignal();
-      print('✅ Manual service start completed');
-      
-      print('Step 5: Background monitoring is now active');
-      print('✅ Manual service start completed');
-      
-    } catch (e) {
-      print('❌ Manual service start failed: $e');
     }
   }
 
@@ -494,7 +439,6 @@ class _HomePageState extends State<HomePage> {
     HapticFeedback.mediumImpact();
 
     try {
-      // Test Firebase connectivity first
       print('🔥 Testing Firebase Auth: ${FirebaseAuth.instance.currentUser?.uid}');
       print('🔥 Testing Firestore connection...');
       
@@ -515,7 +459,6 @@ class _HomePageState extends State<HomePage> {
       print('🔥 Firebase service result: $firebaseSuccess');
 
       if (success && firebaseSuccess) {
-        // Only load from Firebase since it's the source of truth
         await _loadTodayMealCount();
         await _loadMealData();
 
@@ -558,8 +501,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-
-
   @override
   void dispose() {
     super.dispose();
@@ -584,31 +525,6 @@ class _HomePageState extends State<HomePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Boot Debug Button
-                    GestureDetector(
-                      onTap: () => _navigateToBootDebug(context),
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.bug_report,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    ),
                     // Settings Button
                     GestureDetector(
                       onTap: () => _navigateToSettings(context),
@@ -637,19 +553,14 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
-              // Main content - Clean card-based layout
+              // Main content
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
-                      // Header with title and progress
                       _buildHeader(),
-
                       const SizedBox(height: 20),
-
-
-                      // Main content based on state
                       Expanded(
                         child: _todayMealCount == _maxMealsPerDay
                             ? _buildCompletionScreen()
@@ -671,24 +582,13 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(
         builder: (context) => SettingsScreen(
           onDataDeleted: () {
-            // Navigate back to setup after data deletion
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (context) => const AppWrapper()),
               (route) => false,
             );
           },
-          onReset: () {
-            // Handle any reset actions if needed
-          },
+          onReset: () {},
         ),
-      ),
-    );
-  }
-
-  void _navigateToBootDebug(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const BootDebugScreen(),
       ),
     );
   }
@@ -712,7 +612,6 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Celebration
             const Text(
               '🎉 축하합니다! 🎉',
               style: TextStyle(
@@ -722,9 +621,7 @@ class _HomePageState extends State<HomePage> {
               ),
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: 16),
-
             const Text(
               '오늘의 식사\n3번을 모두 완료하셨습니다!',
               style: TextStyle(
@@ -735,10 +632,7 @@ class _HomePageState extends State<HomePage> {
               ),
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: 32),
-
-            // Success icon
             Container(
               width: 120,
               height: 120,
@@ -759,28 +653,21 @@ class _HomePageState extends State<HomePage> {
                 color: Colors.white,
               ),
             ),
-
             const SizedBox(height: 32),
-
-            // Encouragement message
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 color: AppTheme.backgroundLight,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                children: [
-                  const Text(
-                    '정말 잘하셨어요!',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.progressColor,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+              child: const Text(
+                '정말 잘하셨어요!',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.progressColor,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -789,31 +676,20 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // Clean header with title and progress
   Widget _buildHeader() {
     return Column(
       children: [
-        // App logo and title
-        Column(
-          children: [
-            // App logo
-            const SizedBox(height: 16),
-            // App title
-            const Text(
-              '식사하셨어요?',
-              style: TextStyle(
-                fontSize: 32.0,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimary,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-
         const SizedBox(height: 16),
-
-        // Progress indicator
+        const Text(
+          '식사하셨어요?',
+          style: TextStyle(
+            fontSize: 32.0,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textPrimary,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 16),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(3, (index) {
@@ -833,17 +709,14 @@ class _HomePageState extends State<HomePage> {
             );
           }),
         ),
-
       ],
     );
   }
 
-  // Main content with meal tracking
   Widget _buildMainContent() {
     return _buildMealCard();
   }
 
-  // Meal tracking card
   Widget _buildMealCard() {
     return Container(
       width: double.infinity,
@@ -863,7 +736,6 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Title
             const Text(
               '오늘 식사를 하셨나요?',
               style: TextStyle(
@@ -874,37 +746,26 @@ class _HomePageState extends State<HomePage> {
               ),
               textAlign: TextAlign.center,
             ),
-
-
             const SizedBox(height: 32),
-
-            // Current status
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
                 color: AppTheme.backgroundLight,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                children: [
-                  Text(
-                    _todayMealCount == 0
-                        ? '아직 오늘 식사 기록이 없어요'
-                        : '오늘 $_todayMealCount번 식사하셨어요',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textPrimary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+              child: Text(
+                _todayMealCount == 0
+                    ? '아직 오늘 식사 기록이 없어요'
+                    : '오늘 $_todayMealCount번 식사하셨어요',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
-
             const SizedBox(height: 40),
-
-            // Meal button
             Semantics(
               label: '식사 기록하기',
               button: true,
@@ -954,10 +815,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // Button text
             Text(
               _isSaving
                   ? '기록 중...'
@@ -975,10 +833,6 @@ class _HomePageState extends State<HomePage> {
               ),
               textAlign: TextAlign.center,
             ),
-            
-            const SizedBox(height: 20),
-            
-            
           ],
         ),
       ),

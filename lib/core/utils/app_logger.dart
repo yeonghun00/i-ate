@@ -2,7 +2,7 @@ import 'dart:developer' as developer;
 
 enum LogLevel { debug, info, warning, error }
 
-class AppLogger {
+mixin AppLogger {
   static const String _tag = 'ThanksEveryday';
   
   static void debug(String message, {String? tag}) {

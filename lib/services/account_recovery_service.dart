@@ -22,7 +22,7 @@ class AccountRecoveryService with AppLogger {
       
       final familiesResult = await _getFamiliesWithConnectionCode(connectionCode);
       if (familiesResult.isFailure) {
-        return familiesResult;
+        return Failure(familiesResult.exception!);
       }
       
       final families = familiesResult.data!;

@@ -5,13 +5,10 @@ import 'package:thanks_everyday/theme/app_theme.dart';
 class AppHeader extends StatelessWidget {
   final int todayMealCount;
   final VoidCallback onSettingsTap;
-  final VoidCallback onBootDebugTap;
-
   const AppHeader({
     super.key,
     required this.todayMealCount,
     required this.onSettingsTap,
-    required this.onBootDebugTap,
   });
 
   @override
@@ -37,39 +34,12 @@ class AppHeader extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          _buildBootDebugButton(),
-          const SizedBox(width: UIConstants.paddingSmall),
           _buildSettingsButton(),
         ],
       ),
     );
   }
 
-  Widget _buildBootDebugButton() {
-    return GestureDetector(
-      onTap: onBootDebugTap,
-      child: Container(
-        width: UIConstants.buttonHeight,
-        height: UIConstants.buttonHeight,
-        decoration: BoxDecoration(
-          color: Colors.orange.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(UIConstants.radiusCircular),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: UIConstants.shadowOpacity),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.bug_report,
-          color: Colors.white,
-          size: UIConstants.iconMedium,
-        ),
-      ),
-    );
-  }
 
   Widget _buildSettingsButton() {
     return GestureDetector(

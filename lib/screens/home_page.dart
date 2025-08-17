@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:thanks_everyday/core/constants/app_constants.dart';
 import 'package:thanks_everyday/core/state/app_state.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
-import 'package:thanks_everyday/screens/boot_debug_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
@@ -161,13 +160,6 @@ class _HomePageState extends State<HomePage> with AppLogger {
     );
   }
 
-  void _navigateToBootDebug() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const BootDebugScreen(),
-      ),
-    );
-  }
 
   void _onDataDeleted() {
     // Navigate back to setup after data deletion
@@ -194,7 +186,6 @@ class _HomePageState extends State<HomePage> with AppLogger {
                   return AppHeader(
                     todayMealCount: mealState.todayMealCount,
                     onSettingsTap: _navigateToSettings,
-                    onBootDebugTap: _navigateToBootDebug,
                   );
                 },
               ),

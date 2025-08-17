@@ -24,7 +24,7 @@ class AppInitializationService {
       // Initialize Firebase
       final firebaseResult = await _initializeFirebase();
       if (firebaseResult.isFailure) {
-        return firebaseResult;
+        return Failure(firebaseResult.exception!);
       }
       
       // Initialize core services

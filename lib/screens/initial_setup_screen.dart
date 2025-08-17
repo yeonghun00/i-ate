@@ -68,10 +68,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           'flutter.survival_signal_enabled',
           _survivalSignalEnabled,
         );
-        await prefs.setInt(
-          'alert_hours',
-          _alertHours,
-        );
+        await prefs.setInt('alert_hours', _alertHours);
         await prefs.setBool(
           'flutter.location_tracking_enabled',
           _locationTrackingEnabled,
@@ -366,9 +363,8 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   void _navigateToAccountRecovery() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => AccountRecoveryScreen(
-          onRecoveryComplete: widget.onSetupComplete,
-        ),
+        builder: (context) =>
+            AccountRecoveryScreen(onRecoveryComplete: widget.onSetupComplete),
       ),
     );
   }
@@ -709,39 +705,6 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 40),
-
-                      // Setup form
-                      Column(
-                        children: [
-                          const Icon(
-                            Icons.settings_outlined,
-                            size: 60,
-                            color: AppTheme.primaryGreen,
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            '간단한 정보만 입력하세요',
-                            style: TextStyle(
-                              fontSize: 20.0,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textSecondary,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            '설정 후 자녀 앱과 연결됩니다',
-                            style: TextStyle(
-                              fontSize: 16.0,
-                              color: AppTheme.textLight,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 30),
-
                       // Name input
                       _buildInputField(
                         controller: _nameController,

@@ -4,6 +4,7 @@ import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -22,11 +23,18 @@ class SpecialPermissionGuideScreen extends StatefulWidget {
 class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScreen> with WidgetsBindingObserver {
   int _currentStep = 0;
   bool _isChecking = false;
+  bool _backgroundLocationGranted = false;
+  bool _overlayGranted = false;
   bool _hasUsagePermission = false;
   bool _hasBatteryPermission = false;
   bool _isMiuiDevice = false;
   bool _miuiAutostartPermissionAcknowledged = false;
-  Timer? _permissionCheckTimer;
+  
+  // Previous permission states to prevent unnecessary UI updates
+  bool _previousBackgroundLocationGranted = false;
+  bool _previousOverlayGranted = false;
+  bool _previousHasUsagePermission = false;
+  bool _previousHasBatteryPermission = false;
 
   @override
   void initState() {
@@ -34,7 +42,6 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     WidgetsBinding.instance.addObserver(this);
     _detectMiuiDevice();
     _checkPermissions();
-    _startPermissionPolling();
   }
   
   void _detectMiuiDevice() async {
@@ -60,7 +67,6 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _permissionCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -82,37 +88,66 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
 
     try {
       print('Checking permissions...');
+      
+      // Check all permissions
+      final backgroundLocationStatus = await Permission.locationAlways.status;
+      final overlayStatus = await Permission.systemAlertWindow.status;
       final hasUsagePermission = await ScreenMonitorService.checkUsageStatsPermission();
       final hasBatteryPermission = await ScreenMonitorService.checkBatteryOptimization();
       
+      final backgroundLocationGranted = backgroundLocationStatus.isGranted;
+      final overlayGranted = overlayStatus.isGranted;
+      
+      print('Background location permission: $backgroundLocationGranted');
+      print('Overlay permission: $overlayGranted');
       print('Usage stats permission: $hasUsagePermission');
       print('Battery optimization disabled: $hasBatteryPermission');
       
       if (mounted) {
-        setState(() {
-          _hasUsagePermission = hasUsagePermission;
-          _hasBatteryPermission = hasBatteryPermission;
-          _isChecking = false;
-          
-          // Update current step based on permissions
-          if (hasUsagePermission && hasBatteryPermission) {
-            if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
-              print('Basic permissions granted, moving to MIUI autostart step');
-              _currentStep = 2; // MIUI autostart step
-            } else {
-              print('All permissions granted, jumping to completion step');
-              _currentStep = _isMiuiDevice ? 3 : 2; // Complete (adjusted for MIUI step)
-            }
-          } else if (hasUsagePermission && !hasBatteryPermission) {
-            print('Usage permission granted, moving to step 1 (battery optimization)');
-            _currentStep = 1; // Battery optimization step
-          } else {
-            print('Usage permission not granted, staying at step 0');
-            _currentStep = 0; // Usage stats step
-          }
-        });
+        // Only update state if permissions have actually changed
+        final bool stateChanged = 
+          _previousBackgroundLocationGranted != backgroundLocationGranted ||
+          _previousOverlayGranted != overlayGranted ||
+          _previousHasUsagePermission != hasUsagePermission ||
+          _previousHasBatteryPermission != hasBatteryPermission;
         
-        print('UI updated: hasUsagePermission=$_hasUsagePermission, hasBatteryPermission=$_hasBatteryPermission, currentStep=$_currentStep');
+        if (stateChanged || _isChecking) {
+          setState(() {
+            _backgroundLocationGranted = backgroundLocationGranted;
+            _overlayGranted = overlayGranted;
+            _hasUsagePermission = hasUsagePermission;
+            _hasBatteryPermission = hasBatteryPermission;
+            _isChecking = false;
+            
+            // Update previous state tracking
+            _previousBackgroundLocationGranted = backgroundLocationGranted;
+            _previousOverlayGranted = overlayGranted;
+            _previousHasUsagePermission = hasUsagePermission;
+            _previousHasBatteryPermission = hasBatteryPermission;
+            
+            // Update current step based on permissions
+            final totalSteps = _isMiuiDevice ? 5 : 4; // background location, overlay, usage, battery + optional MIUI
+            
+            if (!backgroundLocationGranted) {
+              _currentStep = 0; // Background location step
+            } else if (!overlayGranted) {
+              _currentStep = 1; // Overlay permission step
+            } else if (!hasUsagePermission) {
+              _currentStep = 2; // Usage stats step
+            } else if (!hasBatteryPermission) {
+              _currentStep = 3; // Battery optimization step
+            } else if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
+              _currentStep = 4; // MIUI autostart step
+            } else {
+              _currentStep = totalSteps; // Completion step
+            }
+          });
+        } else {
+          // Just update the checking state without triggering UI rebuild
+          _isChecking = false;
+        }
+        
+        print('UI updated: currentStep=$_currentStep');
       }
     } catch (e) {
       print('Error checking permissions: $e');
@@ -129,9 +164,18 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     
     try {
       if (_currentStep == 0) {
+        // Request background location permission with proper flow
+        await _requestBackgroundLocationPermission();
+      } else if (_currentStep == 1) {
+        // Request overlay permission
+        final overlayResult = await Permission.systemAlertWindow.request();
+        setState(() {
+          _overlayGranted = overlayResult.isGranted;
+        });
+      } else if (_currentStep == 2) {
         // Request usage stats permission
         await ScreenMonitorService.requestUsageStatsPermission();
-      } else if (_currentStep == 1) {
+      } else if (_currentStep == 3) {
         // Request battery optimization disable
         await ScreenMonitorService.requestBatteryOptimizationDisable();
       }
@@ -146,49 +190,110 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     }
   }
 
-  void _startPermissionPolling() {
-    // Check permissions every 1 second for real-time updates
-    final maxStep = _isMiuiDevice ? 3 : 2; // Adjust for MIUI step
-    _permissionCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted && _currentStep < maxStep) {
-        _checkPermissions();
-      } else {
-        timer.cancel();
+
+  Future<void> _requestBackgroundLocationPermission() async {
+    print('🔄 Starting two-step background location permission flow...');
+    
+    try {
+      // Step 1: Request foreground location permissions first
+      print('Step 1: Requesting foreground location permission...');
+      final foregroundResults = await [
+        Permission.locationWhenInUse,
+        Permission.location,
+      ].request();
+      
+      final foregroundGranted = foregroundResults[Permission.locationWhenInUse]?.isGranted == true ||
+                                foregroundResults[Permission.location]?.isGranted == true;
+      
+      if (!foregroundGranted) {
+        print('❌ Foreground location permission denied');
+        _showMessage('위치 권한이 필요합니다. 설정에서 위치 권한을 허용해주세요.');
+        return;
       }
-    });
+      
+      print('✅ Step 1 completed: Foreground location permission granted');
+      
+      // Step 2: Now request background location permission
+      print('Step 2: Requesting background location permission...');
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      final backgroundResult = await Permission.locationAlways.request();
+      
+      setState(() {
+        _backgroundLocationGranted = backgroundResult.isGranted;
+      });
+      
+      if (_backgroundLocationGranted) {
+        print('🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!');
+        _showMessage('✅ 위치 권한이 설정되었습니다! GPS 추적이 활성화됩니다.');
+      } else {
+        print('⚠️ Background location permission DENIED - user selected "While using app" or denied');
+        _showMessage('⚠️ "항상 허용"을 선택해야 GPS 추적이 제대로 작동합니다.');
+      }
+      
+    } catch (e) {
+      print('Error in background location permission flow: $e');
+      _showMessage('권한 요청 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
+  }
+
+  // Manual refresh method for when user wants to check permissions
+  Future<void> _refreshPermissions() async {
+    print('Manual permission refresh requested');
+    await _checkPermissions();
   }
 
   void _nextStep() {
     print('_nextStep called, currentStep: $_currentStep');
     
     if (_currentStep == 0) {
-      // Check if usage permission is granted before advancing
-      if (_hasUsagePermission) {
+      // Check if background location permission is granted before advancing
+      if (_backgroundLocationGranted) {
         setState(() {
           _currentStep = 1;
         });
         print('Advanced to step: $_currentStep');
       } else {
-        print('Cannot advance - usage permission not granted');
+        print('Cannot advance - background location permission not granted');
       }
     } else if (_currentStep == 1) {
+      // Check if overlay permission is granted before advancing
+      if (_overlayGranted) {
+        setState(() {
+          _currentStep = 2;
+        });
+        print('Advanced to step: $_currentStep');
+      } else {
+        print('Cannot advance - overlay permission not granted');
+      }
+    } else if (_currentStep == 2) {
+      // Check if usage permission is granted before advancing
+      if (_hasUsagePermission) {
+        setState(() {
+          _currentStep = 3;
+        });
+        print('Advanced to step: $_currentStep');
+      } else {
+        print('Cannot advance - usage permission not granted');
+      }
+    } else if (_currentStep == 3) {
       // Check if battery permission is granted before advancing
       if (_hasBatteryPermission) {
         setState(() {
-          _currentStep = _isMiuiDevice ? 2 : 2; // MIUI step or completion
+          _currentStep = _isMiuiDevice ? 4 : 5; // MIUI step or completion
         });
         print('Advanced to step: $_currentStep');
       } else {
         print('Cannot advance - battery permission not granted');
       }
-    } else if (_currentStep == 2 && _isMiuiDevice) {
+    } else if (_currentStep == 4 && _isMiuiDevice) {
       // MIUI autostart permission step
       setState(() {
         _miuiAutostartPermissionAcknowledged = true;
-        _currentStep = 3; // Completion step for MIUI devices
+        _currentStep = 5; // Completion step for MIUI devices
       });
       print('MIUI autostart permission acknowledged, advanced to step: $_currentStep');
-    } else if (_currentStep == 2 || _currentStep == 3) {
+    } else if (_currentStep >= 4) {
       // All done - navigate to main page
       _completeSetup();
     }
@@ -215,11 +320,10 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     print('Current widget mounted: $mounted');
     print('Current permissions - usage: $_hasUsagePermission, battery: $_hasBatteryPermission');
     
-    // Cancel timer to prevent interference
-    _permissionCheckTimer?.cancel();
-    
     // Ensure we have all permissions before proceeding
-    if (!_hasUsagePermission || !_hasBatteryPermission || (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
+    if (!_backgroundLocationGranted || !_overlayGranted || 
+        !_hasUsagePermission || !_hasBatteryPermission || 
+        (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
       print('Not all permissions granted - cannot complete setup');
       if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
         _showMessage('MIUI 자동 시작 권한 안내를 확인해주세요.');
@@ -310,7 +414,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                     ],
                   ),
                   child: const Text(
-                    '생존 신호 감지 설정',
+                    '앱 권한 설정',
                     style: TextStyle(
                       fontSize: 28.0,
                       fontWeight: FontWeight.bold,
@@ -342,58 +446,47 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   }
 
   Widget _buildStepIndicator() {
-    final totalSteps = _isMiuiDevice ? 4 : 3; // Add extra step for MIUI devices
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    final totalSteps = _isMiuiDevice ? 5 : 4; // All permission steps + optional MIUI
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 8,
       children: List.generate(totalSteps, (index) {
         final isCompleted = index < _currentStep;
         final isCurrent = index == _currentStep;
         
-        return Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isCompleted 
-                    ? const Color(0xFF10B981)
-                    : isCurrent 
-                        ? const Color(0xFF3B82F6)
-                        : const Color(0xFFE5E7EB),
-                border: Border.all(
-                  color: isCompleted || isCurrent
-                      ? Colors.transparent
-                      : const Color(0xFFD1D5DB),
-                  width: 2,
-                ),
-              ),
-              child: Center(
-                child: isCompleted
-                    ? const Icon(
-                        Icons.check,
-                        size: 20,
-                        color: Colors.white,
-                      )
-                    : Text(
-                        '${index + 1}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isCurrent ? Colors.white : const Color(0xFF9CA3AF),
-                        ),
-                      ),
-              ),
-            ),
-            if (index < 2)
-              Container(
-                width: 40,
-                height: 2,
-                color: isCompleted 
-                    ? const Color(0xFF10B981)
+        return Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isCompleted 
+                ? const Color(0xFF10B981)
+                : isCurrent 
+                    ? const Color(0xFF3B82F6)
                     : const Color(0xFFE5E7EB),
-              ),
-          ],
+            border: Border.all(
+              color: isCompleted || isCurrent
+                  ? Colors.transparent
+                  : const Color(0xFFD1D5DB),
+              width: 2,
+            ),
+          ),
+          child: Center(
+            child: isCompleted
+                ? const Icon(
+                    Icons.check,
+                    size: 16,
+                    color: Colors.white,
+                  )
+                : Text(
+                    '${index + 1}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isCurrent ? Colors.white : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+          ),
         );
       }),
     );
@@ -402,23 +495,202 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   Widget _buildStepContent() {
     switch (_currentStep) {
       case 0:
-        return _buildStep1();
+        return _buildBackgroundLocationStep();
       case 1:
-        return _buildStep2();
+        return _buildOverlayStep();
       case 2:
+        return _buildUsageStatsStep();
+      case 3:
+        return _buildBatteryStep();
+      case 4:
         if (_isMiuiDevice) {
           return _buildMiuiStep(); // MIUI autostart permission step
         } else {
-          return _buildStep3(); // Completion step for non-MIUI
+          return _buildCompletionStep(); // Completion step for non-MIUI
         }
-      case 3:
-        return _buildStep3(); // Completion step for MIUI devices
+      case 5:
+        return _buildCompletionStep(); // Completion step for MIUI devices
       default:
-        return _buildStep1();
+        return _buildBackgroundLocationStep();
     }
   }
 
-  Widget _buildStep1() {
+
+  Widget _buildBackgroundLocationStep() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.my_location_rounded,
+            size: 80,
+            color: Color(0xFFFF7043),
+          ),
+          
+          const SizedBox(height: 20),
+          
+          const Text(
+            '위치 접근 권한',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2E3440),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 16),
+          
+          Text(
+            _backgroundLocationGranted 
+                ? '✅ 위치 권한이 설정되었습니다!\n\n• 가족과 위치 공유 활성화\n• 안전 확인 기능 사용 가능\n• 다음 단계로 진행하세요'
+                : '가족과 위치를 공유하여 안전을 확인하기 위해\n위치 접근 권한이 필요합니다.\n\n'
+                  '• 가족이 당신의 위치를 확인 가능\n'
+                  '• 안전한 위치 공유 서비스\n'
+                  '• "항상 허용" 옵션을 선택해주세요',
+            style: TextStyle(
+              fontSize: 16,
+              color: _backgroundLocationGranted ? const Color(0xFF10B981) : const Color(0xFF6B7280),
+              height: 1.5,
+              fontWeight: _backgroundLocationGranted ? FontWeight.w600 : FontWeight.normal,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 20),
+          
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFDCFDF7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF10B981)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.family_restroom,
+                  color: Color(0xFF10B981),
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: const Text(
+                    '위치 정보는 가족 공유 목적으로만 사용됩니다.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF047857),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverlayStep() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.layers_rounded,
+            size: 80,
+            color: Color(0xFF8B5CF6),
+          ),
+          
+          const SizedBox(height: 20),
+          
+          const Text(
+            '다른 앱 위에 표시 권한',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2E3440),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 16),
+          
+          Text(
+            _overlayGranted 
+                ? '✅ 오버레이 권한이 설정되었습니다!\n\n• 백그라운드 모니터링 활성화\n• 안전 신호 감지 준비 완료\n• 다음 단계로 진행하세요'
+                : '백그라운드에서 안전 모니터링을 위해\n다른 앱 위에 표시 권한이 필요합니다.\n\n'
+                  '• 백그라운드 안전 모니터링\n'
+                  '• 응급 상황 감지\n'
+                  '• 시스템 알림 표시',
+            style: TextStyle(
+              fontSize: 16,
+              color: _overlayGranted ? const Color(0xFF10B981) : const Color(0xFF6B7280),
+              height: 1.5,
+              fontWeight: _overlayGranted ? FontWeight.w600 : FontWeight.normal,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          
+          const SizedBox(height: 20),
+          
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3E8FF),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF8B5CF6)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.security,
+                  color: Color(0xFF8B5CF6),
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: const Text(
+                    '이 권한은 안전 모니터링에만 사용됩니다.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF8B5CF6),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUsageStatsStep() {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -443,7 +715,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           const SizedBox(height: 20),
           
           const Text(
-            '휴대폰 사용 모니터링 권한',
+            '안전 모니터링 권한',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -456,11 +728,11 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           
           Text(
             _hasUsagePermission 
-                ? '✅ 권한이 설정되었습니다!\n\n• 화면 사용 모니터링 활성화\n• 생존 신호 감지 준비 완료\n• 다음 단계로 진행하세요'
-                : '생존 신호 감지를 위해 휴대폰 화면 사용을 모니터링합니다.\n\n'
-                  '• 화면이 켜질 때마다 기록\n'
-                  '• 12시간 이상 미사용시 가족에게 알림\n'
-                  '• 개인정보는 수집하지 않음',
+                ? '✅ 권한이 설정되었습니다!\n\n• 안전 확인 기능 활성화\n• 가족 알림 서비스 준비 완료\n• 다음 단계로 진행하세요'
+                : '가족에게 안전을 알리기 위해\n휴대폰 사용 모니터링 권한이 필요합니다.\n\n'
+                  '• 대략적인 휴대폰 사용 패턴 추적\n'
+                  '• 장시간 미사용시 가족에게 알림\n'
+                  '• 개인 데이터는 수집하지 않음',
             style: TextStyle(
               fontSize: 16,
               color: _hasUsagePermission ? const Color(0xFF10B981) : const Color(0xFF6B7280),
@@ -489,7 +761,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                 const SizedBox(width: 12),
                 Expanded(
                   child: const Text(
-                    '이 권한은 Android 설정에서 직접 허용해야 합니다.',
+                    '이 권한은 안드로이드 설정에서 직접 허용해주세요.',
                     style: TextStyle(
                       fontSize: 14,
                       color: Color(0xFF92400E),
@@ -505,7 +777,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     );
   }
 
-  Widget _buildStep2() {
+  Widget _buildBatteryStep() {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -530,7 +802,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           const SizedBox(height: 20),
           
           const Text(
-            '배터리 최적화 해제',
+            '배터리 설정 조정',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -543,10 +815,10 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           
           Text(
             _hasBatteryPermission
-                ? '✅ 배터리 최적화가 해제되었습니다!\n\n• 앱이 백그라운드에서 계속 실행\n• 정확한 생존 신호 감지\n• 다음 단계로 진행하세요'
-                : '지속적인 모니터링을 위해 배터리 최적화를 해제합니다.\n\n'
-                  '• 앱이 백그라운드에서 계속 실행\n'
-                  '• 정확한 생존 신호 감지\n'
+                ? '✅ 배터리 설정이 완료되었습니다!\n\n• 앱이 안정적으로 실행\n• 가족 알림 기능 정상 작동\n• 다음 단계로 진행하세요'
+                : '앱이 안정적으로 작동하도록\n배터리 설정을 조정합니다.\n\n'
+                  '• 앱이 백그라운드에서 실행\n'
+                  '• 안정적인 가족 알림 서비스\n'
                   '• 배터리 사용량은 최소화됨',
             style: TextStyle(
               fontSize: 16,
@@ -576,7 +848,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                 const SizedBox(width: 12),
                 Expanded(
                   child: const Text(
-                    '이 설정은 생존 신호 감지에 필수입니다.',
+                    '이 설정은 앱의 안정적인 작동에 필수입니다.',
                     style: TextStyle(
                       fontSize: 14,
                       color: Color(0xFF047857),
@@ -592,7 +864,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     );
   }
 
-  Widget _buildStep3() {
+  Widget _buildCompletionStep() {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -629,9 +901,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           const SizedBox(height: 16),
           
           const Text(
-            '모든 권한이 설정되었습니다.\n이제 생존 신호 감지가 활성화됩니다.\n\n'
-            '• 휴대폰 사용 모니터링 시작\n'
-            '• 설정된 시간 미사용시 가족 알림\n'
+            '모든 권한이 설정되었습니다.\n이제 가족 안전 확인 서비스를 사용할 수 있습니다.\n\n'
+            '• 가족과 위치 공유 시작\n'
+            '• 정기적인 안전 확인 알림\n'
             '• 백그라운드에서 자동 실행',
             style: TextStyle(
               fontSize: 16,
@@ -801,48 +1073,64 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     }
 
     switch (_currentStep) {
-      case 0:
+      case 0: // Background location permission
         return Column(
           children: [
-            // Request permissions button
-            GestureDetector(
-              onTap: _hasUsagePermission ? _nextStep : _requestPermissions,
-              child: Container(
-                width: double.infinity,
-                height: 60,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(30),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF3B82F6).withValues(alpha: 0.3),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Text(
-                    _hasUsagePermission ? '다음 단계로' : '권한 설정하기',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
+            _buildStandardPermissionButton(
+              hasPermission: _backgroundLocationGranted,
+              requestText: '위치 권한 허용하기',
+              nextText: '다음 단계로',
+              color: const Color(0xFF3B82F6),
             ),
             
             const SizedBox(height: 16),
             
             // Refresh button
             GestureDetector(
-              onTap: _checkPermissions,
+              onTap: _refreshPermissions,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B82F6).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF3B82F6)),
+                ),
+                child: const Text(
+                  '권한 상태 확인하기',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF3B82F6),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+        
+      case 1: // Overlay permission
+        return _buildStandardPermissionButton(
+          hasPermission: _overlayGranted,
+          requestText: '오버레이 권한 허용하기',
+          nextText: '다음 단계로',
+          color: const Color(0xFF8B5CF6),
+        );
+        
+      case 2: // Usage stats permission
+        return Column(
+          children: [
+            _buildStandardPermissionButton(
+              hasPermission: _hasUsagePermission,
+              requestText: '사용 통계 권한 설정하기',
+              nextText: '다음 단계로',
+              color: const Color(0xFF3B82F6),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Refresh button
+            GestureDetector(
+              onTap: _refreshPermissions,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
@@ -878,41 +1166,15 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           ],
         );
         
-      case 1:
-        return GestureDetector(
-          onTap: _hasBatteryPermission ? _nextStep : _requestPermissions,
-          child: Container(
-            width: double.infinity,
-            height: 60,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(30),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF10B981), Color(0xFF059669)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryGreen.withValues(alpha: 0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Center(
-              child: Text(
-                _hasBatteryPermission ? '다음 단계' : '배터리 최적화 해제',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
+      case 3: // Battery optimization
+        return _buildStandardPermissionButton(
+          hasPermission: _hasBatteryPermission,
+          requestText: '배터리 최적화 해제',
+          nextText: '다음 단계로',
+          color: const Color(0xFF10B981),
         );
         
-      case 2:
+      case 4: // MIUI or Completion
         if (_isMiuiDevice) {
           // MIUI autostart permission buttons
           return Column(
@@ -1027,8 +1289,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           );
         }
         
-      case 3:
-        // MIUI completion button
+      case 5: // MIUI completion
         return GestureDetector(
           onTap: () {
             print('MIUI 앱 사용 시작하기 button clicked');
@@ -1068,5 +1329,45 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  Widget _buildStandardPermissionButton({
+    required bool hasPermission,
+    required String requestText,
+    required String nextText,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTap: hasPermission ? _nextStep : _requestPermissions,
+      child: Container(
+        width: double.infinity,
+        height: 60,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [color, color.withValues(alpha: 0.8)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.3),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            hasPermission ? nextText : requestText,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

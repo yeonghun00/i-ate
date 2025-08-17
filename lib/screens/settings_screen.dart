@@ -5,12 +5,11 @@ import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/location_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
-import 'package:thanks_everyday/screens/boot_debug_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onDataDeleted;
   final VoidCallback onReset;
-  
+
   const SettingsScreen({
     super.key,
     required this.onDataDeleted,
@@ -21,7 +20,8 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   final FirebaseService _firebaseService = FirebaseService();
   String? _familyCode;
   String? _elderlyName;
@@ -58,25 +58,31 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Future<void> _loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Check actual location permission status
-      bool hasBackgroundLocationPermission = await _checkBackgroundLocationPermission();
-      bool savedLocationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
-      
+      bool hasBackgroundLocationPermission =
+          await _checkBackgroundLocationPermission();
+      bool savedLocationEnabled =
+          prefs.getBool('flutter.location_tracking_enabled') ?? false;
+
       // If setting says enabled but permission is missing, disable it
-      bool actualLocationEnabled = savedLocationEnabled && hasBackgroundLocationPermission;
-      
+      bool actualLocationEnabled =
+          savedLocationEnabled && hasBackgroundLocationPermission;
+
       if (savedLocationEnabled && !hasBackgroundLocationPermission) {
-        print('⚠️ GPS was enabled but background location permission is missing - disabling');
+        print(
+          '⚠️ GPS was enabled but background location permission is missing - disabling',
+        );
         await prefs.setBool('flutter.location_tracking_enabled', false);
         await LocationService.setLocationTrackingEnabled(false);
       }
-      
+
       setState(() {
         _familyCode = _firebaseService.familyCode;
         _elderlyName = _firebaseService.elderlyName;
         // Recovery code loading removed
-        _survivalSignalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
+        _survivalSignalEnabled =
+            prefs.getBool('flutter.survival_signal_enabled') ?? false;
         _alertHours = prefs.getInt('alert_hours') ?? 12;
         _familyContact = prefs.getString('family_contact');
         _locationTrackingEnabled = actualLocationEnabled;
@@ -89,13 +95,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
-
 
   void _showDeleteAccountDialog() {
     showDialog(
@@ -123,10 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(
                 '취소',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF6B7280),
-                ),
+                style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
               ),
             ),
             TextButton(
@@ -150,19 +149,17 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     );
   }
 
-
-
   Future<void> _deleteAllData() async {
     try {
       // Delete from Firebase if family code exists
       if (_familyCode != null) {
         await _firebaseService.deleteFamilyCode(_familyCode!);
       }
-      
+
       // Clear all local data
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      
+
       _showMessage('모든 데이터가 삭제되었습니다.');
       print('All data deleted successfully');
     } catch (e) {
@@ -171,17 +168,21 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     }
   }
 
-
   Future<void> _updateSettings() async {
-    print('Updating settings - survivalSignal: $_survivalSignalEnabled, alertHours: $_alertHours');
-    
+    print(
+      'Updating settings - survivalSignal: $_survivalSignalEnabled, alertHours: $_alertHours',
+    );
+
     try {
       // Update local settings first
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('flutter.survival_signal_enabled', _survivalSignalEnabled);
+      await prefs.setBool(
+        'flutter.survival_signal_enabled',
+        _survivalSignalEnabled,
+      );
       await prefs.setInt('alert_hours', _alertHours);
       print('Local settings updated successfully');
-      
+
       // Update screen monitoring service
       try {
         if (_survivalSignalEnabled) {
@@ -195,7 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         print('Error updating screen monitor service: $e');
         // Don't fail the entire update if screen monitoring fails
       }
-      
+
       // Update Firebase settings
       if (_familyCode != null) {
         try {
@@ -205,7 +206,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             familyContact: _familyContact ?? '',
             alertHours: _alertHours,
           );
-          
+
           if (success) {
             print('Firebase settings updated successfully');
           } else {
@@ -218,7 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       } else {
         print('No family code found, skipping Firebase update');
       }
-      
+
       _showMessage('설정이 저장되었습니다.');
     } catch (e) {
       print('Error updating settings: $e');
@@ -229,11 +230,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Future<void> _updateLocationSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('flutter.location_tracking_enabled', _locationTrackingEnabled);
-      
+      await prefs.setBool(
+        'flutter.location_tracking_enabled',
+        _locationTrackingEnabled,
+      );
+
       // Update location service
-      await LocationService.setLocationTrackingEnabled(_locationTrackingEnabled);
-      
+      await LocationService.setLocationTrackingEnabled(
+        _locationTrackingEnabled,
+      );
+
       _showMessage('위치 추적 설정이 저장되었습니다.');
     } catch (e) {
       print('Error updating location settings: $e');
@@ -245,10 +251,10 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('food_alert_threshold', _foodAlertHours);
-      
+
       // Update food tracking service
       await FoodTrackingService.setFoodAlertThreshold(_foodAlertHours);
-      
+
       _showMessage('식사 알림 설정이 저장되었습니다.');
     } catch (e) {
       print('Error updating food settings: $e');
@@ -328,19 +334,19 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                       });
                     },
                   ),
-                  
+
                   // Alert hours setting (only show when survival signal is enabled)
                   if (_survivalSignalEnabled) ...[
                     const SizedBox(height: 16),
                     _buildAlertHoursSelector(),
                   ],
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   _buildLocationToggleItem(),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   _buildToggleItem(
                     icon: Icons.restaurant_rounded,
                     title: '식사 알림',
@@ -353,29 +359,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                       Future.delayed(const Duration(milliseconds: 300), () {
                         _updateFoodSettings();
                       });
-                    },
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
-              // Debug Section
-              _buildSection(
-                title: '개발자 도구',
-                children: [
-                  _buildActionButton(
-                    icon: Icons.bug_report,
-                    title: '부팅 디버그',
-                    subtitle: '재부팅 후 GPS/생존신호 작동 상태 확인',
-                    color: const Color(0xFF3B82F6),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const BootDebugScreen(),
-                        ),
-                      );
                     },
                   ),
                 ],
@@ -414,18 +397,12 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                     const SizedBox(height: 4),
                     const Text(
                       'v1.0.0',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF9CA3AF),
-                      ),
+                      style: TextStyle(fontSize: 14, color: Color(0xFF9CA3AF)),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '가족과 함께하는 식사 관리',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[500],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
                     ),
                   ],
                 ),
@@ -480,11 +457,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   }) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 24,
-          color: const Color(0xFF10B981),
-        ),
+        Icon(icon, size: 24, color: const Color(0xFF10B981)),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -534,11 +507,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   }) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 24,
-          color: const Color(0xFF10B981),
-        ),
+        Icon(icon, size: 24, color: const Color(0xFF10B981)),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -590,11 +559,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 24,
-              color: color,
-            ),
+            Icon(icon, size: 24, color: color),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -619,38 +584,27 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 ],
               ),
             ),
-            Icon(
-              Icons.arrow_forward_ios,
-              size: 16,
-              color: color,
-            ),
+            Icon(Icons.arrow_forward_ios, size: 16, color: color),
           ],
         ),
       ),
     );
   }
-  
+
   Widget _buildAlertHoursSelector() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFFF8F9FA),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFE5E7EB),
-          width: 1,
-        ),
+        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.schedule,
-                size: 20,
-                color: const Color(0xFF10B981),
-              ),
+              Icon(Icons.schedule, size: 20, color: const Color(0xFF10B981)),
               const SizedBox(width: 8),
               const Text(
                 '알림 시간 설정',
@@ -663,7 +617,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             ],
           ),
           const SizedBox(height: 12),
-          
+
           // Time options
           Wrap(
             spacing: 8,
@@ -686,9 +640,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFF10B981)
-                        : Colors.white,
+                    color: isSelected ? const Color(0xFF10B981) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: isSelected
@@ -696,16 +648,20 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                           : const Color(0xFFD1D5DB),
                       width: 2,
                     ),
-                    boxShadow: isSelected ? [
-                      BoxShadow(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ] : [],
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(
+                                0xFF10B981,
+                              ).withValues(alpha: 0.2),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : [],
                   ),
                   child: Text(
-                    '${hours}시간',
+                    '$hours시간',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -718,11 +674,11 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               );
             }).toList(),
           ),
-          
+
           const SizedBox(height: 12),
-          
+
           Text(
-            '${_alertHours}시간 이상 휴대폰을 사용하지 않으면 자녀에게 알림이 전송됩니다.',
+            '$_alertHours시간 이상 휴대폰을 사용하지 않으면 자녀에게 알림이 전송됩니다.',
             style: const TextStyle(
               fontSize: 14,
               color: Color(0xFF6B7280),
@@ -742,9 +698,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         bool hasPermission = snapshot.data ?? false;
         String subtitle;
         Color subtitleColor;
-        
+
         if (_locationTrackingEnabled && hasPermission) {
-          subtitle = '✅ 위치 정보를 자녀에게 공유 (2분마다)';
+          subtitle = '위치 정보를 자녀에게 공유 (10분마다)';
           subtitleColor = const Color(0xFF10B981);
         } else if (_locationTrackingEnabled && !hasPermission) {
           subtitle = '⚠️ "항상 허용" 권한이 필요합니다';
@@ -753,7 +709,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           subtitle = '위치 정보를 자녀에게 공유';
           subtitleColor = const Color(0xFF6B7280);
         }
-        
+
         return _buildToggleItem(
           icon: Icons.location_on_rounded,
           title: 'GPS 위치 추적',
@@ -763,7 +719,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           onChanged: (value) async {
             if (value) {
               // When enabling GPS, request background location permissions first
-              bool permissionGranted = await _requestBackgroundLocationPermission();
+              bool permissionGranted =
+                  await _requestBackgroundLocationPermission();
               if (permissionGranted) {
                 setState(() {
                   _locationTrackingEnabled = true;
@@ -794,44 +751,54 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Future<bool> _checkBackgroundLocationPermission() async {
     PermissionStatus status = await Permission.locationAlways.status;
     bool granted = status.isGranted;
-    
-    print('📍 Background location permission status: $status (granted: $granted)');
+
+    print(
+      '📍 Background location permission status: $status (granted: $granted)',
+    );
     return granted;
   }
 
   // Request background location permission with proper two-step flow
   Future<bool> _requestBackgroundLocationPermission() async {
     print('🔄 Starting two-step background location permission flow...');
-    
+
     // Step 1: Request foreground location permissions first
     Map<Permission, PermissionStatus> foregroundStatuses = await [
       Permission.locationWhenInUse,
       Permission.location,
     ].request();
-    
-    bool foregroundGranted = foregroundStatuses[Permission.locationWhenInUse]?.isGranted == true ||
-                            foregroundStatuses[Permission.location]?.isGranted == true;
-    
+
+    bool foregroundGranted =
+        foregroundStatuses[Permission.locationWhenInUse]?.isGranted == true ||
+        foregroundStatuses[Permission.location]?.isGranted == true;
+
     if (!foregroundGranted) {
       print('❌ Foreground location permission denied');
       return false;
     }
-    
+
     print('✅ Step 1 completed: Foreground location permission granted');
-    
+
     // Step 2: Now request background location permission (this shows "Always allow" option)
     await Future.delayed(const Duration(milliseconds: 500));
-    PermissionStatus backgroundStatus = await Permission.locationAlways.request();
-    
+    PermissionStatus backgroundStatus = await Permission.locationAlways
+        .request();
+
     bool backgroundGranted = backgroundStatus.isGranted;
-    
+
     if (backgroundGranted) {
-      print('🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!');
-      print('✅ GPS will now work continuously every 2 minutes even when app is killed');
+      print(
+        '🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!',
+      );
+      print(
+        '✅ GPS will now work continuously every 2 minutes even when app is killed',
+      );
     } else {
-      print('⚠️ Background location permission DENIED - user selected "While using app" or denied');
+      print(
+        '⚠️ Background location permission DENIED - user selected "While using app" or denied',
+      );
     }
-    
+
     return backgroundGranted;
   }
 
@@ -845,7 +812,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           content: const Text(
             'GPS 위치 추적이 제대로 작동하려면 "항상 허용" 권한이 필요합니다.\n\n'
             '설정에서 위치 권한을 "항상 허용"으로 변경해주세요.\n\n'
-            '앱이 백그라운드에서도 2분마다 위치를 자녀에게 전송할 수 있습니다.'
+            '앱이 백그라운드에서도 2분마다 위치를 자녀에게 전송할 수 있습니다.',
           ),
           actions: [
             TextButton(

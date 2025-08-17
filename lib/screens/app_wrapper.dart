@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:thanks_everyday/core/services/app_initialization_service.dart';
 import 'package:thanks_everyday/core/state/app_state.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
+import 'package:thanks_everyday/core/errors/app_exceptions.dart';
 import 'package:thanks_everyday/screens/home_page.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/services/miui_boot_helper.dart';

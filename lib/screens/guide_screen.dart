@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:thanks_everyday/screens/permission_guide_screen.dart';
 import 'package:thanks_everyday/screens/special_permission_guide_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 
@@ -19,45 +18,27 @@ class _GuideScreenState extends State<GuideScreen> {
   final List<GuideStep> _steps = [
     GuideStep(
       title: '환영합니다!',
-      description: '식사하셨어요? 앱 사용법을\n간단히 알려드릴게요',
+      description: '식사 기록 앱에 오신 것을\n환영합니다',
       icon: Icons.waving_hand,
       color: AppTheme.primaryGreen,
     ),
     GuideStep(
-      title: '식사 기록 버튼',
-      description: '화면 가운데 큰 버튼을\n눌러서 식사를 기록하세요',
+      title: '식사 기록',
+      description: '하루 3번까지 식사를 기록하고\n건강을 관리하세요',
       icon: Icons.restaurant_rounded,
       color: AppTheme.primaryGreen,
     ),
     GuideStep(
-      title: '위치도 함께',
-      description: '원하시면 위치도\n함께 추가할 수 있어요',
-      icon: Icons.gps_fixed_outlined,
-      color: AppTheme.accentBlue,
-    ),
-    GuideStep(
-      title: '하루 3번까지',
-      description: '하루에 3번까지\n식사를 기록할 수 있어요',
-      icon: Icons.fastfood_rounded,
-      color: AppTheme.accentPink,
-    ),
-    GuideStep(
       title: '가족과 공유',
-      description: '가족들이 당신의 식사\n상황을 확인할 수 있어요',
+      description: '가족들이 당신의 식사와\n안전 상태를 확인할 수 있어요',
       icon: Icons.family_restroom,
       color: AppTheme.accentPurple,
     ),
     GuideStep(
-      title: '특별 권한 설정',
-      description: '휴대폰 사용 모니터링을 위한\n특별 권한이 필요해요',
+      title: '권한 설정',
+      description: '앱이 정상 작동하려면\n몇 가지 권한이 필요해요',
       icon: Icons.admin_panel_settings,
       color: AppTheme.accentPurple,
-    ),
-    GuideStep(
-      title: '시작할 준비 완료!',
-      description: '이제 식사를 기록하고\n건강을 관리해보세요',
-      icon: Icons.celebration,
-      color: AppTheme.accentOrange,
     ),
   ];
 
@@ -76,20 +57,11 @@ class _GuideScreenState extends State<GuideScreen> {
         curve: Curves.easeInOut,
       );
     } else {
-      // Navigate to basic permissions first, then special permissions
+      // Navigate directly to special permissions (now includes all permissions)
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => PermissionGuideScreen(
-            onPermissionsGranted: () {
-              // After basic permissions, show special permissions
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (context) => SpecialPermissionGuideScreen(
-                    onPermissionsComplete: widget.onGuideComplete,
-                  ),
-                ),
-              );
-            },
+          builder: (context) => SpecialPermissionGuideScreen(
+            onPermissionsComplete: widget.onGuideComplete,
           ),
         ),
       );
