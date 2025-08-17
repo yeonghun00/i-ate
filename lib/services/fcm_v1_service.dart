@@ -307,8 +307,16 @@ class FCMv1Service {
     required String deviceId,
     required String fcmToken,
     String? deviceName,
+    String? userId,
   }) async {
     try {
+      // First, add the child user to the family's member list
+      if (userId != null) {
+        await _firestore.collection('families').doc(familyId).update({
+          'memberIds': FieldValue.arrayUnion([userId]),
+        });
+      }
+
       await _firestore
           .collection('families')
           .doc(familyId)
@@ -318,6 +326,7 @@ class FCMv1Service {
             'fcm_token': fcmToken,
             'device_id': deviceId,
             'device_name': deviceName ?? 'Child Device',
+            'user_id': userId ?? '',
             'is_active': true,
             'registered_at': FieldValue.serverTimestamp(),
             'last_updated': FieldValue.serverTimestamp(),

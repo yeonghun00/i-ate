@@ -177,6 +177,26 @@ class FirebaseService {
     String elderlyName,
   ) async {
     try {
+      // Ensure user is authenticated
+      if (_auth.currentUser == null) {
+        print('User not authenticated, attempting to sign in...');
+        try {
+          await _auth.signInAnonymously();
+          print('Anonymous sign-in successful');
+        } catch (authError) {
+          print('Failed to authenticate: $authError');
+          return false;
+        }
+      }
+
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null || currentUserId.isEmpty) {
+        print('No valid user ID available');
+        return false;
+      }
+
+      print('Creating family document with user ID: $currentUserId');
+
       // Create family document with unique ID
       await _firestore.collection('families').doc(familyId).set({
         'familyId': familyId,
@@ -186,6 +206,9 @@ class FirebaseService {
         'deviceInfo': 'Android Device',
         'isActive': true,
         'approved': null, // null = pending, true = approved, false = rejected
+        // Security fields for Firebase rules
+        'createdBy': currentUserId,
+        'memberIds': [currentUserId],
         'settings': {
           'survivalSignalEnabled': false,
           'familyContact': '',
@@ -250,19 +273,36 @@ class FirebaseService {
   // Verify family code exists (for family members)
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     try {
-      final query = await _firestore
-          .collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
+      // Ensure _familyId is available - if not, try to restore it from SharedPreferences
+      if (_familyId == null) {
+        print('_familyId is null, attempting to restore from SharedPreferences');
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          _familyId = prefs.getString('family_id');
+          if (_familyId != null) {
+            print('Successfully restored family ID: $_familyId');
+          } else {
+            print('ERROR: No family ID found in SharedPreferences. Cannot retrieve family info.');
+            return null;
+          }
+        } catch (e) {
+          print('ERROR: Failed to restore family ID from SharedPreferences: $e');
+          return null;
+        }
+      }
 
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        final data = doc.data();
+      // Use stored family ID (secure and user has permission)
+      print('Getting family info using family ID: $_familyId');
+      final doc = await _firestore.collection('families').doc(_familyId!).get();
+      
+      if (doc.exists) {
+        final data = doc.data()!;
         data['familyId'] = doc.id; // Add document ID for reference
         return data;
+      } else {
+        print('ERROR: Family document does not exist for ID: $_familyId');
+        return null;
       }
-      return null;
     } catch (e) {
       print('Failed to get family info: $e');
       return null;
@@ -544,30 +584,36 @@ class FirebaseService {
   Stream<bool?> listenForApproval(String connectionCode) async* {
     print('Setting up Firebase listener for connection code: $connectionCode');
 
-    // First find the family document by connection code
-    final query = await _firestore
-        .collection('families')
-        .where('connectionCode', isEqualTo: connectionCode)
-        .limit(1)
-        .get();
-
-    if (query.docs.isEmpty) {
-      print('No family found with connection code: $connectionCode');
-      yield null;
-      return;
+    // Ensure _familyId is available - if not, try to restore it from SharedPreferences
+    if (_familyId == null) {
+      print('_familyId is null, attempting to restore from SharedPreferences');
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        _familyId = prefs.getString('family_id');
+        if (_familyId != null) {
+          print('Successfully restored family ID for listening: $_familyId');
+        } else {
+          print('ERROR: No family ID found in SharedPreferences. Cannot listen for approval.');
+          yield null;
+          return;
+        }
+      } catch (e) {
+        print('ERROR: Failed to restore family ID from SharedPreferences: $e');
+        yield null;
+        return;
+      }
     }
 
-    final familyId = query.docs.first.id;
-    print('Found family ID: $familyId for connection code: $connectionCode');
+    print('Listening for approval on family ID: $_familyId');
 
-    // Listen to the family document by ID
+    // Listen to the family document by ID (user has permission since they created it)
     await for (final snapshot
         in _firestore
             .collection('families')
-            .doc(familyId)
+            .doc(_familyId!)
             .snapshots(includeMetadataChanges: true)) {
       print(
-        'Firebase snapshot received for family ID $familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}',
+        'Firebase snapshot received for family ID $_familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}',
       );
 
       if (snapshot.exists) {
