@@ -125,18 +125,15 @@ class FamilyConnectionService with AppLogger {
           'familyContact': '',
           'alertHours': AppConstants.defaultAlertHours,
         },
-        'survivalAlert': {'isActive': false, 'timestamp': null, 'message': ''},
-        'foodAlert': {
-          'isActive': false,
-          'timestamp': null,
-          'message': '',
-          'elderlyName': '',
-          'lastFoodIntake': null,
-          'hoursWithoutFood': null,
+        'alerts': {
+          'survival': null,  // timestamp when active, null when inactive
+          'food': null       // timestamp when active, null when inactive
         },
-        'lastFoodIntake': {'timestamp': null, 'todayCount': 0},
-        'lastMealTime': null,
-        'todayMealCount': 0,
+        'lastMeal': {
+          'timestamp': null,
+          'count': 0,
+          'number': null
+        },
         'location': {
           'latitude': null,
           'longitude': null,

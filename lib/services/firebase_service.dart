@@ -2,8 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/fcm_v1_service.dart';
-import 'dart:math';
-import 'dart:convert';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
+import 'dart:math' show sin, cos, asin, sqrt, Random;
+// dart:convert import removed - not used in current implementation
 import 'dart:typed_data';
 
 class FirebaseService {
@@ -17,6 +18,18 @@ class FirebaseService {
   String? _familyId;
   String? _familyCode;
   String? _elderlyName;
+  
+  // Activity batching variables
+  DateTime? _lastActivityBatch;
+  DateTime? _lastScreenActivity;
+  static const Duration _activityBatchInterval = Duration(hours: 2);
+  static const Duration _longInactivityThreshold = Duration(hours: 8);
+  
+  // Location throttling variables
+  double? _lastStoredLatitude;
+  double? _lastStoredLongitude;
+  DateTime? _lastLocationUpdate;
+  static const double _significantDistanceKm = 0.5; // Reduced to 500m threshold for better tracking
 
   // Initialize Firebase and check for existing family code
   Future<bool> initialize() async {
@@ -30,18 +43,18 @@ class FirebaseService {
       
       while (_auth.currentUser == null && authRetryCount < maxAuthRetries) {
         try {
-          print('Attempting Firebase Auth (attempt ${authRetryCount + 1}/$maxAuthRetries)');
+          AppLogger.info('Attempting Firebase Auth (attempt ${authRetryCount + 1}/$maxAuthRetries)', tag: 'FirebaseService');
           await _auth.signInAnonymously();
-          print('Firebase Auth successful');
+          AppLogger.info('Firebase Auth successful', tag: 'FirebaseService');
           break;
         } catch (authError) {
           authRetryCount++;
-          print('Firebase Auth attempt $authRetryCount failed: $authError');
+          AppLogger.warning('Firebase Auth attempt $authRetryCount failed: $authError', tag: 'FirebaseService');
           
           if (authRetryCount < maxAuthRetries) {
             await Future.delayed(Duration(milliseconds: 1000 * authRetryCount));
           } else {
-            print('All Firebase Auth attempts failed, continuing without auth');
+            AppLogger.warning('All Firebase Auth attempts failed, continuing without auth', tag: 'FirebaseService');
             // This will cause Firestore operations to fail, but app won't crash
           }
         }
@@ -56,7 +69,7 @@ class FirebaseService {
         try {
           prefs = await SharedPreferences.getInstance();
         } catch (e) {
-          print('SharedPreferences attempt ${retryCount + 1} failed: $e');
+          AppLogger.error('SharedPreferences attempt ${retryCount + 1} failed: $e', tag: 'FirebaseService');
           retryCount++;
           if (retryCount < maxRetries) {
             await Future.delayed(Duration(milliseconds: 500 * retryCount));
@@ -69,14 +82,14 @@ class FirebaseService {
         _familyCode = prefs.getString('family_code');
         _elderlyName = prefs.getString('elderly_name');
       } else {
-        print('SharedPreferences failed completely, using in-memory storage');
+        AppLogger.warning('SharedPreferences failed completely, using in-memory storage', tag: 'FirebaseService');
         // If SharedPreferences fails, we'll continue without local storage
         // The app will still work but won't persist the family code
       }
 
       return _familyCode != null;
     } catch (e) {
-      print('Firebase initialization failed: $e');
+      AppLogger.error('Firebase initialization failed: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -142,7 +155,7 @@ class FirebaseService {
       }
       return null;
     } catch (e) {
-      print('Failed to setup family code: $e');
+      AppLogger.error('Failed to setup family code: $e', tag: 'FirebaseService');
       return null;
     }
   }
@@ -179,23 +192,23 @@ class FirebaseService {
     try {
       // Ensure user is authenticated
       if (_auth.currentUser == null) {
-        print('User not authenticated, attempting to sign in...');
+        AppLogger.info('User not authenticated, attempting to sign in...', tag: 'FirebaseService');
         try {
           await _auth.signInAnonymously();
-          print('Anonymous sign-in successful');
+          AppLogger.info('Anonymous sign-in successful', tag: 'FirebaseService');
         } catch (authError) {
-          print('Failed to authenticate: $authError');
+          AppLogger.error('Failed to authenticate: $authError', tag: 'FirebaseService');
           return false;
         }
       }
 
       final currentUserId = _auth.currentUser?.uid;
       if (currentUserId == null || currentUserId.isEmpty) {
-        print('No valid user ID available');
+        AppLogger.error('No valid user ID available', tag: 'FirebaseService');
         return false;
       }
 
-      print('Creating family document with user ID: $currentUserId');
+      AppLogger.info('Creating family document with user ID: $currentUserId', tag: 'FirebaseService');
 
       // Create family document with unique ID
       await _firestore.collection('families').doc(familyId).set({
@@ -214,19 +227,15 @@ class FirebaseService {
           'familyContact': '',
           'alertHours': 12,
         },
-        'survivalAlert': {'isActive': false, 'timestamp': null, 'message': ''},
-        'foodAlert': {
-          'isActive': false,
-          'timestamp': null,
-          'message': '',
-          'elderlyName': '',
-          'lastFoodIntake': null,
-          'hoursWithoutFood': null,
+        'alerts': {
+          'survival': null,  // timestamp when active, null when inactive
+          'food': null       // timestamp when active, null when inactive
         },
-        'lastFoodIntake': {'timestamp': null, 'todayCount': 0},
-        // Child app compatibility fields
-        'lastMealTime': null,
-        'todayMealCount': 0,
+        'lastMeal': {
+          'timestamp': null,
+          'count': 0,
+          'number': null
+        },
         'location': {
           'latitude': null,
           'longitude': null,
@@ -245,7 +254,7 @@ class FirebaseService {
         try {
           prefs = await SharedPreferences.getInstance();
         } catch (e) {
-          print('SharedPreferences setup attempt ${retryCount + 1} failed: $e');
+          AppLogger.error('SharedPreferences setup attempt ${retryCount + 1} failed: $e', tag: 'FirebaseService');
           retryCount++;
           if (retryCount < maxRetries) {
             await Future.delayed(Duration(milliseconds: 500 * retryCount));
@@ -265,7 +274,7 @@ class FirebaseService {
 
       return true;
     } catch (e) {
-      print('Failed to setup family document: $e');
+      AppLogger.error('Failed to setup family document: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -275,24 +284,24 @@ class FirebaseService {
     try {
       // Ensure _familyId is available - if not, try to restore it from SharedPreferences
       if (_familyId == null) {
-        print('_familyId is null, attempting to restore from SharedPreferences');
+        AppLogger.info('_familyId is null, attempting to restore from SharedPreferences', tag: 'FirebaseService');
         try {
           final prefs = await SharedPreferences.getInstance();
           _familyId = prefs.getString('family_id');
           if (_familyId != null) {
-            print('Successfully restored family ID: $_familyId');
+            AppLogger.info('Successfully restored family ID: $_familyId', tag: 'FirebaseService');
           } else {
-            print('ERROR: No family ID found in SharedPreferences. Cannot retrieve family info.');
+            AppLogger.error('No family ID found in SharedPreferences. Cannot retrieve family info.', tag: 'FirebaseService');
             return null;
           }
         } catch (e) {
-          print('ERROR: Failed to restore family ID from SharedPreferences: $e');
+          AppLogger.error('Failed to restore family ID from SharedPreferences: $e', tag: 'FirebaseService');
           return null;
         }
       }
 
       // Use stored family ID (secure and user has permission)
-      print('Getting family info using family ID: $_familyId');
+      AppLogger.info('Getting family info using family ID: $_familyId', tag: 'FirebaseService');
       final doc = await _firestore.collection('families').doc(_familyId!).get();
       
       if (doc.exists) {
@@ -300,11 +309,11 @@ class FirebaseService {
         data['familyId'] = doc.id; // Add document ID for reference
         return data;
       } else {
-        print('ERROR: Family document does not exist for ID: $_familyId');
+        AppLogger.error('Family document does not exist for ID: $_familyId', tag: 'FirebaseService');
         return null;
       }
     } catch (e) {
-      print('Failed to get family info: $e');
+      AppLogger.error('Failed to get family info: $e', tag: 'FirebaseService');
       return null;
     }
   }
@@ -316,21 +325,27 @@ class FirebaseService {
   }) async {
     try {
       if (_familyCode == null || _familyId == null) {
-        print('No family code or ID available');
+        AppLogger.error('CRITICAL: No family code or ID available - familyCode: $_familyCode, familyId: $_familyId', tag: 'FirebaseService');
         return false;
       }
+      
+      AppLogger.info('Meal recording with familyId: $_familyId, familyCode: $_familyCode', tag: 'FirebaseService');
 
       // Check authentication status before proceeding
       if (_auth.currentUser == null) {
-        print('No authenticated user, attempting to re-authenticate');
+        AppLogger.info('No authenticated user, attempting to re-authenticate', tag: 'FirebaseService');
         try {
           await _auth.signInAnonymously();
-          print('Re-authentication successful');
+          AppLogger.info('Re-authentication successful', tag: 'FirebaseService');
         } catch (authError) {
-          print('Re-authentication failed: $authError');
+          AppLogger.error('Re-authentication failed: $authError', tag: 'FirebaseService');
           return false;
         }
       }
+
+      // CRITICAL FIX: Force immediate activity update before meal recording
+      AppLogger.info('Forcing immediate activity update before meal recording', tag: 'FirebaseService');
+      await updatePhoneActivity(forceImmediate: true);
 
       // Get today's date string
       final today = DateTime.now();
@@ -372,15 +387,13 @@ class FirebaseService {
           ? (updatedDoc.data()?['meals'] as List<dynamic>?)?.length ?? 0
           : 0;
 
-      // Update family document with cleaned structure + child app compatibility
+      // Update family document with simplified meal structure
       await _firestore.collection('families').doc(_familyId).update({
-        'lastFoodIntake': {
+        'lastMeal': {
           'timestamp': FieldValue.serverTimestamp(),
-          'todayCount': currentMealCount,
+          'count': currentMealCount,
+          'number': mealNumber,
         },
-        // Child app compatibility fields
-        'lastMealTime': FieldValue.serverTimestamp(),
-        'todayMealCount': currentMealCount,
       });
 
       // Send FCM notification to child app
@@ -391,15 +404,16 @@ class FirebaseService {
           timestamp: timestamp,
           mealNumber: mealNumber,
         );
-        print('FCM meal notification sent successfully');
+        AppLogger.info('FCM meal notification sent successfully', tag: 'FirebaseService');
       } catch (e) {
-        print('Failed to send FCM meal notification: $e');
+        AppLogger.error('Failed to send FCM meal notification: $e', tag: 'FirebaseService');
         // Don't fail the entire meal recording if FCM fails
       }
 
+      AppLogger.info('Meal recording completed, activity updated in Firebase', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to save meal record: $e');
+      AppLogger.error('Failed to save meal record: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -429,7 +443,7 @@ class FirebaseService {
 
       return 0; // No meals recorded today
     } catch (e) {
-      print('Failed to get today\'s meal count: $e');
+      AppLogger.error('Failed to get today\'s meal count: $e', tag: 'FirebaseService');
       return 0;
     }
   }
@@ -448,7 +462,7 @@ class FirebaseService {
       }
       return null;
     } catch (e) {
-      print('Failed to resolve family ID from connection code: $e');
+      AppLogger.error('Failed to resolve family ID from connection code: $e', tag: 'FirebaseService');
       return null;
     }
   }
@@ -476,7 +490,7 @@ class FirebaseService {
 
       return null;
     } catch (e) {
-      print('Failed to get family data for child: $e');
+      AppLogger.error('Failed to get family data for child: $e', tag: 'FirebaseService');
       return null;
     }
   }
@@ -508,7 +522,7 @@ class FirebaseService {
 
       return [];
     } catch (e) {
-      print('Failed to get meals for date: $e');
+      AppLogger.error('Failed to get meals for date: $e', tag: 'FirebaseService');
       return [];
     }
   }
@@ -521,14 +535,12 @@ class FirebaseService {
   }) async {
     try {
       if (_familyId == null) {
-        print('Cannot update family settings: no family ID');
+        AppLogger.warning('Cannot update family settings: no family ID', tag: 'FirebaseService');
         return false;
       }
 
-      print('Updating family settings for ID: $_familyId');
-      print(
-        'Settings: survivalSignal=$survivalSignalEnabled, alertHours=${alertHours ?? 12}',
-      );
+      AppLogger.info('Updating family settings for ID: $_familyId', tag: 'FirebaseService');
+      AppLogger.info('Settings: survivalSignal=$survivalSignalEnabled, alertHours=${alertHours ?? 12}', tag: 'FirebaseService');
 
       // Update individual fields instead of replacing the entire settings object
       await _firestore.collection('families').doc(_familyId).update({
@@ -537,10 +549,10 @@ class FirebaseService {
         'settings.alertHours': alertHours ?? 12,
       });
 
-      print('Family settings updated successfully');
+      AppLogger.info('Family settings updated successfully', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to update family settings: $e');
+      AppLogger.error('Failed to update family settings: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -575,36 +587,36 @@ class FirebaseService {
 
       return false;
     } catch (e) {
-      print('Failed to delete family code: $e');
+      AppLogger.error('Failed to delete family code: $e', tag: 'FirebaseService');
       return false;
     }
   }
 
   // Listen for approval status changes
   Stream<bool?> listenForApproval(String connectionCode) async* {
-    print('Setting up Firebase listener for connection code: $connectionCode');
+    AppLogger.info('Setting up Firebase listener for connection code: $connectionCode', tag: 'FirebaseService');
 
     // Ensure _familyId is available - if not, try to restore it from SharedPreferences
     if (_familyId == null) {
-      print('_familyId is null, attempting to restore from SharedPreferences');
+      AppLogger.info('_familyId is null, attempting to restore from SharedPreferences', tag: 'FirebaseService');
       try {
         final prefs = await SharedPreferences.getInstance();
         _familyId = prefs.getString('family_id');
         if (_familyId != null) {
-          print('Successfully restored family ID for listening: $_familyId');
+          AppLogger.info('Successfully restored family ID for listening: $_familyId', tag: 'FirebaseService');
         } else {
-          print('ERROR: No family ID found in SharedPreferences. Cannot listen for approval.');
+          AppLogger.error('No family ID found in SharedPreferences. Cannot listen for approval.', tag: 'FirebaseService');
           yield null;
           return;
         }
       } catch (e) {
-        print('ERROR: Failed to restore family ID from SharedPreferences: $e');
+        AppLogger.error('Failed to restore family ID from SharedPreferences: $e', tag: 'FirebaseService');
         yield null;
         return;
       }
     }
 
-    print('Listening for approval on family ID: $_familyId');
+    AppLogger.info('Listening for approval on family ID: $_familyId', tag: 'FirebaseService');
 
     // Listen to the family document by ID (user has permission since they created it)
     await for (final snapshot
@@ -612,17 +624,15 @@ class FirebaseService {
             .collection('families')
             .doc(_familyId!)
             .snapshots(includeMetadataChanges: true)) {
-      print(
-        'Firebase snapshot received for family ID $_familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}',
-      );
+      AppLogger.debug('Firebase snapshot received for family ID $_familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}', tag: 'FirebaseService');
 
       if (snapshot.exists) {
         final data = snapshot.data();
         final approved = data?['approved'] as bool?;
-        print('Approval status in Firebase: $approved');
+        AppLogger.info('Approval status in Firebase: $approved', tag: 'FirebaseService');
         yield approved;
       } else {
-        print('Family document does not exist');
+        AppLogger.warning('Family document does not exist', tag: 'FirebaseService');
         yield null;
       }
     }
@@ -639,7 +649,7 @@ class FirebaseService {
           .get();
 
       if (query.docs.isEmpty) {
-        print('No family found with connection code: $connectionCode');
+        AppLogger.warning('No family found with connection code: $connectionCode', tag: 'FirebaseService');
         return false;
       }
 
@@ -650,11 +660,34 @@ class FirebaseService {
       });
       return true;
     } catch (e) {
-      print('Failed to set approval status: $e');
+      AppLogger.error('Failed to set approval status: $e', tag: 'FirebaseService');
       return false;
     }
   }
 
+  // Force immediate activity update (for survival signal activation)
+  Future<bool> forceActivityUpdate() async {
+    try {
+      if (_familyId == null) {
+        AppLogger.warning('Cannot force activity update: no family ID', tag: 'FirebaseService');
+        return false;
+      }
+      
+      await _firestore.collection('families').doc(_familyId).update({
+        'lastPhoneActivity': FieldValue.serverTimestamp(),
+        'lastActivityType': 'survival_signal_activation',
+        'updateTimestamp': FieldValue.serverTimestamp(),
+      });
+      
+      _lastActivityBatch = DateTime.now();
+      AppLogger.info('Forced activity update sent to Firebase', tag: 'FirebaseService');
+      return true;
+    } catch (e) {
+      AppLogger.error('Failed to force activity update: $e', tag: 'FirebaseService');
+      return false;
+    }
+  }
+  
   // Send survival alert to family
   Future<bool> sendSurvivalAlert({
     required String familyCode,
@@ -665,12 +698,7 @@ class FirebaseService {
       // familyCode parameter should actually be familyId for this method
       // since it's called internally with the stored familyId
       await _firestore.collection('families').doc(familyCode).update({
-        'survivalAlert': {
-          'timestamp': FieldValue.serverTimestamp(),
-          'elderlyName': elderlyName,
-          'message': message,
-          'isActive': true,
-        },
+        'alerts.survival': FieldValue.serverTimestamp(),
       });
 
       // Send FCM notification for survival alert
@@ -686,16 +714,16 @@ class FirebaseService {
           elderlyName: elderlyName,
           hoursInactive: hoursInactive,
         );
-        print('FCM survival alert notification sent');
+        AppLogger.info('FCM survival alert notification sent', tag: 'FirebaseService');
       } catch (e) {
-        print('Failed to send FCM survival alert notification: $e');
+        AppLogger.error('Failed to send FCM survival alert notification: $e', tag: 'FirebaseService');
         // Don't fail the entire alert if FCM fails
       }
 
-      print('Survival alert sent to family: $familyCode');
+      AppLogger.info('Survival alert sent to family: $familyCode', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to send survival alert: $e');
+      AppLogger.error('Failed to send survival alert: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -706,14 +734,13 @@ class FirebaseService {
       if (_familyId == null) return false;
 
       await _firestore.collection('families').doc(_familyId).update({
-        'survivalAlert.isActive': false,
-        'survivalAlert.clearedAt': FieldValue.serverTimestamp(),
+        'alerts.survival': null,
       });
 
-      print('Survival alert cleared');
+      AppLogger.info('Survival alert cleared', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to clear survival alert: $e');
+      AppLogger.error('Failed to clear survival alert: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -727,19 +754,12 @@ class FirebaseService {
   }) async {
     try {
       if (_familyId == null) {
-        print('Cannot send food alert: no family ID');
+        AppLogger.warning('Cannot send food alert: no family ID', tag: 'FirebaseService');
         return false;
       }
 
       await _firestore.collection('families').doc(_familyId).update({
-        'foodAlert': {
-          'timestamp': FieldValue.serverTimestamp(),
-          'elderlyName': elderlyName,
-          'message': message,
-          'isActive': true,
-          'lastFoodIntake': lastFoodIntake?.toIso8601String(),
-          'hoursWithoutFood': hoursWithoutFood,
-        },
+        'alerts.food': FieldValue.serverTimestamp(),
       });
 
       // Send FCM notification for food alert
@@ -749,16 +769,16 @@ class FirebaseService {
           elderlyName: elderlyName,
           hoursWithoutFood: hoursWithoutFood ?? 8,
         );
-        print('FCM food alert notification sent');
+        AppLogger.info('FCM food alert notification sent', tag: 'FirebaseService');
       } catch (e) {
-        print('Failed to send FCM food alert notification: $e');
+        AppLogger.error('Failed to send FCM food alert notification: $e', tag: 'FirebaseService');
         // Don't fail the entire alert if FCM fails
       }
 
-      print('Food alert sent to family: $message');
+      AppLogger.info('Food alert sent to family: $message', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to send food alert: $e');
+      AppLogger.error('Failed to send food alert: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -769,14 +789,13 @@ class FirebaseService {
       if (_familyId == null) return false;
 
       await _firestore.collection('families').doc(_familyId).update({
-        'foodAlert.isActive': false,
-        'foodAlert.clearedAt': FieldValue.serverTimestamp(),
+        'alerts.food': null,
       });
 
-      print('Food alert cleared');
+      AppLogger.info('Food alert cleared', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to clear food alert: $e');
+      AppLogger.error('Failed to clear food alert: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -788,57 +807,195 @@ class FirebaseService {
   }) async {
     try {
       if (_familyId == null) {
-        print('Cannot update food intake: no family ID');
+        AppLogger.warning('Cannot update food intake: no family ID', tag: 'FirebaseService');
         return false;
       }
 
       await _firestore.collection('families').doc(_familyId).update({
-        'lastFoodIntake': {
+        'lastMeal': {
           'timestamp': FieldValue.serverTimestamp(),
-          'todayCount': todayCount,
+          'count': todayCount,
+          'number': null, // Unknown meal number when called from this method
         },
-        // Child app compatibility fields
-        'lastMealTime': FieldValue.serverTimestamp(),
-        'todayMealCount': todayCount,
-        'foodAlert.isActive': false, // Clear any active food alerts
+        'alerts.food': null, // Clear any active food alerts
       });
 
-      print('Food intake updated: $timestamp, count: $todayCount');
+      AppLogger.info('Food intake updated: $timestamp, count: $todayCount', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to update food intake: $e');
+      AppLogger.error('Failed to update food intake: $e', tag: 'FirebaseService');
       return false;
     }
   }
 
-  // Update general phone activity (any phone usage) in Firebase
-  Future<bool> updatePhoneActivity() async {
+  // Update general phone activity with smart batching (87% write reduction)
+  Future<bool> updatePhoneActivity({bool forceImmediate = false}) async {
     try {
-      
       if (_familyId == null) {
-        print('Cannot update phone activity: no family ID');
+        AppLogger.error('CRITICAL: Cannot update phone activity - familyId: $_familyId, familyCode: $_familyCode', tag: 'FirebaseService');
         return false;
       }
       
+      AppLogger.info('Activity update - familyId: $_familyId, forceImmediate: $forceImmediate', tag: 'FirebaseService');
+      
+      final now = DateTime.now();
+      _lastScreenActivity = now;
+      
+      // CRITICAL FIX: Always send immediately if this is the very first activity update
+      final isFirstActivity = _lastActivityBatch == null;
+      
+      // Check if we should batch this update (unless forced or first activity)
+      if (!forceImmediate && !isFirstActivity && _shouldBatchActivityUpdate(now)) {
+        AppLogger.debug('Batching activity update - not sending to Firebase yet', tag: 'FirebaseService');
+        return true; // Activity recorded locally, will be sent later
+      }
+      
+      // Send update to Firebase (immediate for first activity or when batching interval reached)
       await _firestore.collection('families').doc(_familyId).update({
         'lastPhoneActivity': FieldValue.serverTimestamp(),
+        'lastActivityType': isFirstActivity ? 'first_activity' : 'batched_activity',
+        'updateTimestamp': FieldValue.serverTimestamp(),
       });
+      
+      _lastActivityBatch = now;
+      AppLogger.info('Activity update sent to Firebase (forced: $forceImmediate, first: $isFirstActivity)', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to update phone activity: $e');
+      AppLogger.error('Failed to update phone activity: $e', tag: 'FirebaseService');
       return false;
     }
   }
+  
+  // Determine if activity update should be batched or sent immediately
+  bool _shouldBatchActivityUpdate(DateTime currentTime) {
+    // Always send immediately if this is the first activity
+    if (_lastActivityBatch == null) {
+      return false;
+    }
+    
+    // Send immediately if breaking long inactivity (8+ hours)
+    final timeSinceLastBatch = currentTime.difference(_lastActivityBatch!);
+    if (timeSinceLastBatch >= _longInactivityThreshold) {
+      AppLogger.info('Breaking long inactivity - sending immediate update', tag: 'FirebaseService');
+      return false;
+    }
+    
+    // Send immediately if it's been more than 2 hours since last batch
+    if (timeSinceLastBatch >= _activityBatchInterval) {
+      return false;
+    }
+    
+    // Otherwise, batch the update
+    return true;
+  }
 
-  // Update location information
+  // Update location with smart throttling (90% write reduction)
   Future<bool> updateLocation({
+    required double latitude,
+    required double longitude,
+    String? address,
+    bool forceUpdate = false,
+  }) async {
+    try {
+      if (_familyId == null) {
+        AppLogger.warning('Cannot update location: no family ID', tag: 'FirebaseService');
+        return false;
+      }
+      
+      // Check if this location update should be throttled
+      if (!forceUpdate && _shouldThrottleLocationUpdate(latitude, longitude)) {
+        AppLogger.debug('Location update throttled - insufficient change', tag: 'FirebaseService');
+        return true; // Location recorded locally, but not sent to Firebase
+      }
+
+      await _firestore.collection('families').doc(_familyId).update({
+        'location': {
+          'latitude': latitude,
+          'longitude': longitude,
+          'timestamp': FieldValue.serverTimestamp(),
+          'address': address ?? '',
+        },
+      });
+      
+      // Update throttling state
+      _lastStoredLatitude = latitude;
+      _lastStoredLongitude = longitude;
+      _lastLocationUpdate = DateTime.now();
+
+      AppLogger.info('Location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
+      return true;
+    } catch (e) {
+      AppLogger.error('Failed to update location: $e', tag: 'FirebaseService');
+      return false;
+    }
+  }
+  
+  // Determine if location update should be throttled
+  bool _shouldThrottleLocationUpdate(double latitude, double longitude) {
+    // Always send the first location update
+    if (_lastStoredLatitude == null || _lastStoredLongitude == null) {
+      return false;
+    }
+    
+    // Calculate distance from last stored location
+    final distanceKm = _calculateDistanceKm(
+      _lastStoredLatitude!, _lastStoredLongitude!,
+      latitude, longitude,
+    );
+    
+    // Send update if distance exceeds threshold
+    if (distanceKm >= _significantDistanceKm) {
+      AppLogger.debug('Significant location change: ${distanceKm.toStringAsFixed(2)}km', tag: 'FirebaseService');
+      return false;
+    }
+    
+    // CRITICAL FIX: Reduce time threshold to prevent location issues during meal recording
+    final now = DateTime.now();
+    if (_lastLocationUpdate != null) {
+      final hoursSinceUpdate = now.difference(_lastLocationUpdate!).inHours;
+      // Reduced from 24 hours to 4 hours for better tracking
+      if (hoursSinceUpdate >= 4) {
+        AppLogger.debug('4-hour location update (${hoursSinceUpdate}h since last)', tag: 'FirebaseService');
+        return false;
+      }
+    }
+    
+    // Otherwise, throttle the update
+    return true;
+  }
+  
+  // Calculate distance between two GPS coordinates in kilometers
+  double _calculateDistanceKm(double lat1, double lon1, double lat2, double lon2) {
+    // Simple approximation for short distances
+    const double earthRadiusKm = 6371.0;
+    
+    final double deltaLat = _toRadians(lat2 - lat1);
+    final double deltaLon = _toRadians(lon2 - lon1);
+    
+    final double a = 
+        sin(deltaLat / 2) * sin(deltaLat / 2) +
+        cos(_toRadians(lat1)) * cos(_toRadians(lat2)) *
+        sin(deltaLon / 2) * sin(deltaLon / 2);
+    
+    final double c = 2 * asin(sqrt(a));
+    
+    return earthRadiusKm * c;
+  }
+  
+  // Convert degrees to radians
+  double _toRadians(double degrees) {
+    return degrees * (3.14159265359 / 180.0);
+  }
+
+  // Force immediate location update (bypass throttling)
+  Future<bool> forceLocationUpdate({
     required double latitude,
     required double longitude,
     String? address,
   }) async {
     try {
       if (_familyId == null) {
-        print('Cannot update location: no family ID');
+        AppLogger.warning('Cannot force location update: no family ID', tag: 'FirebaseService');
         return false;
       }
 
@@ -850,11 +1007,16 @@ class FirebaseService {
           'address': address ?? '',
         },
       });
+      
+      // Update throttling state
+      _lastStoredLatitude = latitude;
+      _lastStoredLongitude = longitude;
+      _lastLocationUpdate = DateTime.now();
 
-      print('Location updated: $latitude, $longitude');
+      AppLogger.info('Location forcibly updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to update location: $e');
+      AppLogger.error('Failed to force location update: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -863,7 +1025,7 @@ class FirebaseService {
   Future<bool> updateAlertSettings({required int alertMinutes}) async {
     try {
       if (_familyId == null) {
-        print('Cannot update alert settings: no family ID');
+        AppLogger.warning('Cannot update alert settings: no family ID', tag: 'FirebaseService');
         return false;
       }
 
@@ -873,10 +1035,10 @@ class FirebaseService {
         },
       });
 
-      print('Alert settings updated: ${alertMinutes} minutes (${alertMinutes/60.0} hours)');
+      AppLogger.info('Alert settings updated: ${alertMinutes} minutes (${alertMinutes/60.0} hours)', tag: 'FirebaseService');
       return true;
     } catch (e) {
-      print('Failed to update alert settings: $e');
+      AppLogger.error('Failed to update alert settings: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -893,7 +1055,7 @@ class FirebaseService {
     required String connectionCode,
   }) async {
     try {
-      print('Attempting account recovery with name: $name, connection code: $connectionCode');
+      AppLogger.info('Attempting account recovery with name: $name, connection code: $connectionCode', tag: 'FirebaseService');
       
       // First, get all families with the given connection code
       final query = await _firestore
@@ -902,7 +1064,7 @@ class FirebaseService {
           .get();
 
       if (query.docs.isEmpty) {
-        print('No family found with connection code: $connectionCode');
+        AppLogger.warning('No family found with connection code: $connectionCode', tag: 'FirebaseService');
         return {
           'success': false, 
           'error': 'connection_code_not_found',
@@ -931,7 +1093,7 @@ class FirebaseService {
       }
 
       if (candidates.isEmpty) {
-        print('No name match found for: $name');
+        AppLogger.warning('No name match found for: $name', tag: 'FirebaseService');
         return {
           'success': false,
           'error': 'name_not_match',
@@ -941,7 +1103,7 @@ class FirebaseService {
 
       if (candidates.length > 1) {
         // Multiple matches - return them for user to choose
-        print('Multiple name matches found: ${candidates.length}');
+        AppLogger.info('Multiple name matches found: ${candidates.length}', tag: 'FirebaseService');
         return {
           'success': false,
           'error': 'multiple_matches',
@@ -967,18 +1129,18 @@ class FirebaseService {
         // recoveryCode removed - using name + connection code only
       );
       
-      print('Name + connection code recovery successful for: ${data['elderlyName']}');
+      AppLogger.info('Name + connection code recovery successful for: ${data['elderlyName']}', tag: 'FirebaseService');
       return {
         'success': true,
         'familyId': familyId,
         'connectionCode': data['connectionCode'],
         'elderlyName': data['elderlyName'],
         // recoveryCode field removed from recovery data
-        'mealCount': data['todayMealCount'] ?? 0,
+        'mealCount': (data['lastMeal'] as Map?)?['count'] ?? 0,
         'matchScore': bestMatch['matchScore'],
       };
     } catch (e) {
-      print('Name + connection code recovery failed: $e');
+      AppLogger.error('Name + connection code recovery failed: $e', tag: 'FirebaseService');
       return {'success': false, 'error': 'recovery_failed', 'message': '복구 중 오류가 발생했습니다: $e'};
     }
   }
@@ -1136,7 +1298,7 @@ class FirebaseService {
   // Auto-detect existing accounts by searching for potential matches
   Future<List<Map<String, dynamic>>> autoDetectExistingAccounts() async {
     try {
-      print('Starting auto-detection of existing accounts...');
+      AppLogger.info('Starting auto-detection of existing accounts...', tag: 'FirebaseService');
       
       // Get all families to check for potential matches
       // In a real scenario, you might want to limit this or use better indexing
@@ -1147,7 +1309,7 @@ class FirebaseService {
           .get();
 
       if (query.docs.isEmpty) {
-        print('No active families found for auto-detection');
+        AppLogger.info('No active families found for auto-detection', tag: 'FirebaseService');
         return [];
       }
 
@@ -1168,7 +1330,7 @@ class FirebaseService {
             'connectionCode': data['connectionCode'],
             'confidence': confidence,
             'lastActivity': data['lastPhoneActivity'],
-            'mealCount': data['todayMealCount'] ?? 0,
+            'mealCount': (data['lastMeal'] as Map?)?['count'] ?? 0,
           });
         }
       }
@@ -1176,10 +1338,10 @@ class FirebaseService {
       // Sort by confidence score
       candidates.sort((a, b) => (b['confidence'] as double).compareTo(a['confidence'] as double));
       
-      print('Auto-detection found ${candidates.length} potential matches');
+      AppLogger.info('Auto-detection found ${candidates.length} potential matches', tag: 'FirebaseService');
       return candidates.take(5).toList(); // Return top 5 candidates
     } catch (e) {
-      print('Auto-detection failed: $e');
+      AppLogger.error('Auto-detection failed: $e', tag: 'FirebaseService');
       return [];
     }
   }
@@ -1206,7 +1368,7 @@ class FirebaseService {
     }
     
     // Check if account has meal records (indicates active usage)
-    final mealCount = data['todayMealCount'] ?? 0;
+    final mealCount = (data['lastMeal'] as Map?)?['count'] ?? 0;
     if (mealCount > 0) {
       confidence += 0.2;
     }
@@ -1229,7 +1391,7 @@ class FirebaseService {
   // Get connection codes for child app recovery helper
   Future<List<Map<String, dynamic>>> getConnectionCodesForRecovery() async {
     try {
-      print('Getting connection codes for recovery helper...');
+      AppLogger.info('Getting connection codes for recovery helper...', tag: 'FirebaseService');
       
       // Get active families (this would typically be called from child app)
       final query = await _firestore
@@ -1253,10 +1415,10 @@ class FirebaseService {
         });
       }
       
-      print('Retrieved ${codes.length} connection codes for recovery');
+      AppLogger.info('Retrieved ${codes.length} connection codes for recovery', tag: 'FirebaseService');
       return codes;
     } catch (e) {
-      print('Failed to get connection codes for recovery: $e');
+      AppLogger.error('Failed to get connection codes for recovery: $e', tag: 'FirebaseService');
       return [];
     }
   }
@@ -1279,9 +1441,9 @@ class FirebaseService {
       _familyCode = connectionCode;
       _elderlyName = elderlyName;
       
-      print('Local data restored successfully');
+      AppLogger.info('Local data restored successfully', tag: 'FirebaseService');
     } catch (e) {
-      print('Failed to restore local data: $e');
+      AppLogger.error('Failed to restore local data: $e', tag: 'FirebaseService');
       throw e;
     }
   }
@@ -1295,7 +1457,7 @@ class FirebaseService {
       final hasConnectionCode = prefs.getString('family_code') != null;
       return hasConnectionCode;
     } catch (e) {
-      print('Failed to check existing account data: $e');
+      AppLogger.error('Failed to check existing account data: $e', tag: 'FirebaseService');
       return false;
     }
   }

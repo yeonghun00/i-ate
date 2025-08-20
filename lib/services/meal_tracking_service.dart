@@ -119,13 +119,15 @@ class MealTrackingService with AppLogger {
 
   Future<void> _updateFamilyMealInfo(String familyId, int mealCount) async {
     try {
+      // Get the latest meal number from the current timestamp context
+      final mealNumber = mealCount; // This will be the meal number (1, 2, or 3)
+      
       await _firestore.collection(AppConstants.collectionFamilies).doc(familyId).update({
-        'lastFoodIntake': {
+        'lastMeal': {
           'timestamp': FieldValue.serverTimestamp(),
-          'todayCount': mealCount,
+          'count': mealCount,
+          'number': mealNumber,
         },
-        'lastMealTime': FieldValue.serverTimestamp(),
-        'todayMealCount': mealCount,
       });
     } catch (e) {
       logError('Failed to update family meal info', error: e);
@@ -223,12 +225,11 @@ class MealTrackingService with AppLogger {
   }) async {
     try {
       await _firestore.collection(AppConstants.collectionFamilies).doc(familyId).update({
-        'lastFoodIntake': {
+        'lastMeal': {
           'timestamp': FieldValue.serverTimestamp(),
-          'todayCount': todayCount,
+          'count': todayCount,
+          'number': null, // Unknown meal number when called from this method
         },
-        'lastMealTime': FieldValue.serverTimestamp(),
-        'todayMealCount': todayCount,
         'foodAlert.isActive': false,
       });
 

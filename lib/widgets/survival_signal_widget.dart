@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class SurvivalSignalWidget extends StatefulWidget {
   const SurvivalSignalWidget({super.key});
@@ -55,7 +56,7 @@ class _SurvivalSignalWidgetState extends State<SurvivalSignalWidget> {
         });
       }
     } catch (e) {
-      print('Failed to load survival signal settings: $e');
+      AppLogger.error('Failed to load survival signal settings: $e', tag: 'SurvivalSignalWidget');
     }
   }
 
@@ -108,7 +109,7 @@ class _SurvivalSignalWidgetState extends State<SurvivalSignalWidget> {
         }
       });
     } catch (e) {
-      print('Failed to setup Firebase listener for survival signal: $e');
+      AppLogger.error('Failed to setup Firebase listener for survival signal: $e', tag: 'SurvivalSignalWidget');
       setState(() {
         _isLoading = false;
       });

@@ -77,6 +77,10 @@
             android:enabled="true"
             android:exported="false"
             android:directBootAware="true">
+            <intent-filter>
+                <action android:name="com.thousandemfla.thanks_everyday.GPS_UPDATE" />
+                <action android:name="com.thousandemfla.thanks_everyday.SURVIVAL_UPDATE" />
+            </intent-filter>
         </receiver>
         
         

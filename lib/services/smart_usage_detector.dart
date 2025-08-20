@@ -4,12 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class SmartUsageDetector {
   static const MethodChannel _channel = MethodChannel('thanks_everyday/usage_detector');
   
   final FirebaseService _firebaseService = FirebaseService();
-  Timer? _batchUpdateTimer;
+  // _batchUpdateTimer removed - batch updates now handled differently
   Timer? _usageCheckTimer;
   Timer? _periodicUsageTimer;
   
@@ -37,7 +38,7 @@ class SmartUsageDetector {
 
   /// Initialize the smart usage detection system
   Future<void> initialize() async {
-    print('🧠 Initializing Smart Usage Detector...');
+    AppLogger.info('Initializing Smart Usage Detector...', tag: 'SmartUsageDetector');
     
     try {
       // Set up immediate screen event listeners (simple approach)
@@ -49,9 +50,9 @@ class SmartUsageDetector {
       // Load previous state
       await _loadLocalState();
       
-      print('✅ Smart Usage Detector initialized successfully');
+      AppLogger.info('Smart Usage Detector initialized successfully', tag: 'SmartUsageDetector');
     } catch (e) {
-      print('❌ Failed to initialize Smart Usage Detector: $e');
+      AppLogger.error('Failed to initialize Smart Usage Detector: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -74,15 +75,15 @@ class SmartUsageDetector {
             await _handleScreenUnlock();
             break;
           default:
-            print('🤷‍♂️ Unknown method: ${call.method}');
+            AppLogger.warning('Unknown method: ${call.method}', tag: 'SmartUsageDetector');
         }
       });
       
       // Register native listeners
       await _channel.invokeMethod('startScreenMonitoring');
-      print('📱 Screen event listeners registered');
+      AppLogger.info('Screen event listeners registered', tag: 'SmartUsageDetector');
     } catch (e) {
-      print('❌ Failed to setup screen listeners: $e');
+      AppLogger.error('Failed to setup screen listeners: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -92,16 +93,16 @@ class SmartUsageDetector {
     _lastScreenOn = now;
     _screenOnCount++;
     
-    print('📱 Screen ON detected at ${now.toIso8601String()}');
+    AppLogger.debug('Screen ON detected at ${now.toIso8601String()}', tag: 'SmartUsageDetector');
     
     // Check if we should update Firebase (every 15 minutes OR after long inactivity)
     final shouldUpdate = _shouldUpdateOnScreenOn(now);
     
     if (shouldUpdate) {
-      print('📤 Screen ON - Updating Firebase (15min interval or critical)');
+      AppLogger.debug('Screen ON - Updating Firebase (15min interval or critical)', tag: 'SmartUsageDetector');
       await _updateFirebaseScreenOn(now);
     } else {
-      print('📱 Screen ON - No Firebase update needed yet');
+      AppLogger.debug('Screen ON - No Firebase update needed yet', tag: 'SmartUsageDetector');
     }
     
     // Update local activity tracking
@@ -145,16 +146,13 @@ class SmartUsageDetector {
         'screenOnTime': Timestamp.fromDate(now),
       };
       
-      await FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .update(updateData);
-      
+      // Use batched activity update instead of direct Firebase writes
+      await _firebaseService.updatePhoneActivity();
       _lastFirebaseUpdate = now;
-      print('✅ Firebase updated on Screen ON - ${minutesSinceLastUpdate} minutes since last update');
+      AppLogger.debug('Firebase updated on Screen ON - ${minutesSinceLastUpdate} minutes since last update', tag: 'SmartUsageDetector');
       
     } catch (e) {
-      print('❌ Failed to update Firebase on screen ON: $e');
+      AppLogger.error('Failed to update Firebase on screen ON: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -163,14 +161,14 @@ class SmartUsageDetector {
     final now = DateTime.now();
     _lastScreenOff = now;
     
-    print('📱 Screen OFF detected at ${now.toIso8601String()}');
+    AppLogger.debug('Screen OFF detected at ${now.toIso8601String()}', tag: 'SmartUsageDetector');
     
     // Calculate active session duration
     if (_lastScreenOn != null) {
       final sessionDuration = now.difference(_lastScreenOn!);
       _totalActiveTime = _totalActiveTime + sessionDuration;
       
-      print('⏱️ Active session: ${sessionDuration.inMinutes} minutes');
+      AppLogger.debug('Active session: ${sessionDuration.inMinutes} minutes', tag: 'SmartUsageDetector');
     }
     
     // Always update Firebase for screen off (survival signal logic)
@@ -185,16 +183,16 @@ class SmartUsageDetector {
     _lastScreenOn = now; // Treat unlock as screen on
     _screenOnCount++;
     
-    print('🔓 Screen UNLOCK detected at ${now.toIso8601String()}');
+    AppLogger.debug('Screen UNLOCK detected at ${now.toIso8601String()}', tag: 'SmartUsageDetector');
     
     // Check if we should update Firebase (every 15 minutes OR after long inactivity)
     final shouldUpdate = _shouldUpdateOnScreenOn(now);
     
     if (shouldUpdate) {
-      print('📤 Screen UNLOCK - Updating Firebase (15min interval or critical)');
+      AppLogger.debug('Screen UNLOCK - Updating Firebase (15min interval or critical)', tag: 'SmartUsageDetector');
       await _updateFirebaseScreenUnlock(now);
     } else {
-      print('🔓 Screen UNLOCK - No Firebase update needed yet');
+      AppLogger.debug('Screen UNLOCK - No Firebase update needed yet', tag: 'SmartUsageDetector');
     }
     
     // Update local activity tracking
@@ -219,16 +217,13 @@ class SmartUsageDetector {
         'screenUnlockTime': Timestamp.fromDate(now),
       };
       
-      await FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .update(updateData);
-      
+      // Use batched activity update instead of direct Firebase writes
+      await _firebaseService.updatePhoneActivity();
       _lastFirebaseUpdate = now;
-      print('✅ Firebase updated on Screen UNLOCK - ${minutesSinceLastUpdate} minutes since last update');
+      AppLogger.debug('Firebase updated on Screen UNLOCK - ${minutesSinceLastUpdate} minutes since last update', tag: 'SmartUsageDetector');
       
     } catch (e) {
-      print('❌ Failed to update Firebase on screen unlock: $e');
+      AppLogger.error('Failed to update Firebase on screen unlock: $e', tag: 'SmartUsageDetector');
     }
   }
   
@@ -249,16 +244,13 @@ class SmartUsageDetector {
         'sessionDurationMinutes': sessionDuration,
       };
       
-      await FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .update(updateData);
-      
+      // Use batched activity update instead of direct Firebase writes
+      await _firebaseService.updatePhoneActivity();
       _lastFirebaseUpdate = now;
-      print('✅ Firebase updated on Screen OFF - ${sessionDuration} minute session');
+      AppLogger.debug('Firebase updated on Screen OFF - ${sessionDuration} minute session', tag: 'SmartUsageDetector');
       
     } catch (e) {
-      print('❌ Failed to update Firebase on screen OFF: $e');
+      AppLogger.error('Failed to update Firebase on screen OFF: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -271,7 +263,7 @@ class SmartUsageDetector {
     final appsUsed = arguments['apps_used'] as int? ?? 0;
     final lastInteractionTime = arguments['last_interaction_time'] as int? ?? 0;
     
-    print('📱 Continuous phone usage detected - Apps: $appsUsed, Usage: ${phoneUsageTimeMs}ms');
+    AppLogger.debug('Continuous phone usage detected - Apps: $appsUsed, Usage: ${phoneUsageTimeMs}ms', tag: 'SmartUsageDetector');
     
     // Update local tracking
     _lastAppUsage = DateTime.fromMillisecondsSinceEpoch(lastInteractionTime);
@@ -282,10 +274,10 @@ class SmartUsageDetector {
     final shouldUpdate = _shouldUpdateOnContinuousUsage(now);
     
     if (shouldUpdate) {
-      print('📤 Continuous usage - Updating Firebase (15min interval reached)');
+      AppLogger.debug('Continuous usage - Updating Firebase (15min interval reached)', tag: 'SmartUsageDetector');
       await _updateFirebaseContinuousUsage(now, phoneUsageTimeMs, appsUsed);
     } else {
-      print('📱 Continuous usage detected - No Firebase update needed yet');
+      AppLogger.debug('Continuous usage detected - No Firebase update needed yet', tag: 'SmartUsageDetector');
     }
     
     await _saveLocalState();
@@ -321,16 +313,13 @@ class SmartUsageDetector {
         'continuousUsageDetected': true,
       };
       
-      await FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .update(updateData);
-      
+      // Use batched activity update instead of direct Firebase writes
+      await _firebaseService.updatePhoneActivity();
       _lastFirebaseUpdate = now;
-      print('✅ Firebase updated for continuous usage - ${minutesSinceLastUpdate} minutes since last update, ${appsUsed} apps used');
+      AppLogger.debug('Firebase updated for continuous usage - ${minutesSinceLastUpdate} minutes since last update, ${appsUsed} apps used', tag: 'SmartUsageDetector');
       
     } catch (e) {
-      print('❌ Failed to update Firebase for continuous usage: $e');
+      AppLogger.error('Failed to update Firebase for continuous usage: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -340,7 +329,7 @@ class SmartUsageDetector {
     _periodicUsageTimer = Timer.periodic(const Duration(minutes: 15), (timer) async {
       await _checkPeriodicUsage();
     });
-    print('⏰ Started 15-minute periodic usage checker');
+    AppLogger.info('Started 15-minute periodic usage checker', tag: 'SmartUsageDetector');
   }
 
   /// Check if we should update Firebase every 15 minutes (even without screen events)
@@ -357,17 +346,17 @@ class SmartUsageDetector {
         final isScreenOn = await _isScreenCurrentlyOn();
         
         if (isScreenOn) {
-          print('📱 Periodic check: Phone in use, updating Firebase');
+          AppLogger.debug('Periodic check: Phone in use, updating Firebase', tag: 'SmartUsageDetector');
           await _updateFirebasePeriodicUsage(now);
         } else {
-          print('📱 Periodic check: Phone not in use, skipping update');
+          AppLogger.debug('Periodic check: Phone not in use, skipping update', tag: 'SmartUsageDetector');
         }
       } else {
-        print('📱 Periodic check: Recent update exists, skipping');
+        AppLogger.debug('Periodic check: Recent update exists, skipping', tag: 'SmartUsageDetector');
       }
       
     } catch (e) {
-      print('❌ Error during periodic usage check: $e');
+      AppLogger.error('Error during periodic usage check: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -377,24 +366,24 @@ class SmartUsageDetector {
       // Try native Android check first (most reliable)
       final result = await _channel.invokeMethod('isScreenCurrentlyOn');
       if (result != null) {
-        print('📱 Native screen state check: ${result ? "ON" : "OFF"}');
+        AppLogger.debug('Native screen state check: ${result ? "ON" : "OFF"}', tag: 'SmartUsageDetector');
         return result as bool;
       }
       
       // Fallback to timestamp-based heuristic
       if (_lastScreenOn != null && _lastScreenOff != null) {
         final isOn = _lastScreenOn!.isAfter(_lastScreenOff!);
-        print('📱 Fallback screen state check: ${isOn ? "ON" : "OFF"}');
+        AppLogger.debug('Fallback screen state check: ${isOn ? "ON" : "OFF"}', tag: 'SmartUsageDetector');
         return isOn;
       } else if (_lastScreenOn != null && _lastScreenOff == null) {
-        print('📱 Fallback screen state check: ON (never turned off)');
+        AppLogger.debug('Fallback screen state check: ON (never turned off)', tag: 'SmartUsageDetector');
         return true; // Screen was turned on but never off
       }
       
-      print('📱 Fallback screen state check: OFF (no data)');
+      AppLogger.debug('Fallback screen state check: OFF (no data)', tag: 'SmartUsageDetector');
       return false;
     } catch (e) {
-      print('⚠️ Error checking screen state: $e');
+      AppLogger.error('Error checking screen state: $e', tag: 'SmartUsageDetector');
       return false;
     }
   }
@@ -416,16 +405,13 @@ class SmartUsageDetector {
         'detectionMethod': 'periodic_timer',
       };
       
-      await FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .update(updateData);
-      
+      // Use batched activity update instead of direct Firebase writes
+      await _firebaseService.updatePhoneActivity();
       _lastFirebaseUpdate = now;
-      print('✅ Periodic Firebase update completed - ${minutesSinceLastUpdate} minutes since last update');
+      AppLogger.debug('Periodic Firebase update completed - ${minutesSinceLastUpdate} minutes since last update', tag: 'SmartUsageDetector');
       
     } catch (e) {
-      print('❌ Failed periodic Firebase update: $e');
+      AppLogger.error('Failed periodic Firebase update: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -448,7 +434,7 @@ class SmartUsageDetector {
       }
       
     } catch (e) {
-      print('⚠️ Failed to save local state: $e');
+      AppLogger.error('Failed to save local state: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -477,9 +463,9 @@ class SmartUsageDetector {
         _lastFirebaseUpdate = DateTime.parse(lastFirebaseUpdateStr);
       }
       
-      print('📂 Local state loaded successfully');
+      AppLogger.debug('Local state loaded successfully', tag: 'SmartUsageDetector');
     } catch (e) {
-      print('⚠️ Failed to load local state: $e');
+      AppLogger.error('Failed to load local state: $e', tag: 'SmartUsageDetector');
     }
   }
 
@@ -490,10 +476,10 @@ class SmartUsageDetector {
     try {
       await _channel.invokeMethod('stopScreenMonitoring');
     } catch (e) {
-      print('⚠️ Error stopping native monitoring: $e');
+      AppLogger.error('Error stopping native monitoring: $e', tag: 'SmartUsageDetector');
     }
     
-    print('🛑 Smart Usage Detector stopped');
+    AppLogger.info('Smart Usage Detector stopped', tag: 'SmartUsageDetector');
   }
 
   /// Get current usage statistics

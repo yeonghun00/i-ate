@@ -1,7 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Cloud Firestore import removed - Firebase operations now handled via FirebaseService
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'dart:async';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class FoodTrackingService {
   static const String _lastFoodIntakeKey = 'last_food_intake';
@@ -14,7 +15,7 @@ class FoodTrackingService {
   // Initialize food tracking service
   static Future<void> initialize() async {
     await _startFoodAlertMonitoring();
-    print('Food tracking service initialized');
+    AppLogger.info('Food tracking service initialized', tag: 'FoodTrackingService');
   }
   
   // Record food intake
@@ -39,10 +40,10 @@ class FoodTrackingService {
         todayCount: todayCount + 1,
       );
       
-      print('Food intake recorded: ${now.toIso8601String()}');
+      AppLogger.info('Food intake recorded: ${now.toIso8601String()}', tag: 'FoodTrackingService');
       return true;
     } catch (e) {
-      print('Failed to record food intake: $e');
+      AppLogger.error('Failed to record food intake: $e', tag: 'FoodTrackingService');
       return false;
     }
   }
@@ -58,7 +59,7 @@ class FoodTrackingService {
       }
       return null;
     } catch (e) {
-      print('Failed to get last food intake: $e');
+      AppLogger.error('Failed to get last food intake: $e', tag: 'FoodTrackingService');
       return null;
     }
   }
@@ -73,7 +74,7 @@ class FoodTrackingService {
       
       return prefs.getInt(todayKey) ?? 0;
     } catch (e) {
-      print('Failed to get today food intake count: $e');
+      AppLogger.error('Failed to get today food intake count: $e', tag: 'FoodTrackingService');
       return 0;
     }
   }
@@ -114,15 +115,10 @@ class FoodTrackingService {
       }
     });
     
-    print('Food alert monitoring started');
+    AppLogger.info('Food alert monitoring started', tag: 'FoodTrackingService');
   }
   
-  // Stop food alert monitoring
-  static Future<void> _stopFoodAlertMonitoring() async {
-    _foodAlertTimer?.cancel();
-    _foodAlertTimer = null;
-    print('Food alert monitoring stopped');
-  }
+  // _stopFoodAlertMonitoring method removed - not currently used
   
   // Send food alert to family
   static Future<void> _sendFoodAlert() async {
@@ -151,9 +147,9 @@ class FoodTrackingService {
         hoursWithoutFood: hoursWithoutFood,
       );
       
-      print('Food alert sent to family: $message');
+      AppLogger.info('Food alert sent to family: $message', tag: 'FoodTrackingService');
     } catch (e) {
-      print('Failed to send food alert: $e');
+      AppLogger.error('Failed to send food alert: $e', tag: 'FoodTrackingService');
     }
   }
   
@@ -162,9 +158,9 @@ class FoodTrackingService {
   static Future<void> clearFoodAlert() async {
     try {
       await _firebaseService.clearFoodAlert();
-      print('Food alert cleared');
+      AppLogger.info('Food alert cleared', tag: 'FoodTrackingService');
     } catch (e) {
-      print('Failed to clear food alert: $e');
+      AppLogger.error('Failed to clear food alert: $e', tag: 'FoodTrackingService');
     }
   }
   

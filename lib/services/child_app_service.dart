@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+// Firebase Storage import removed - not currently used
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class ChildAppService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  // Firebase Storage removed - not currently used in this service
   
   /// 가족 코드 입력하여 어르신 정보 가져오기
   Future<Map<String, dynamic>?> getFamilyInfo(String familyCode) async {
@@ -15,7 +16,7 @@ class ChildAppService {
       }
       return null;
     } catch (e) {
-      print('Failed to get family info: $e');
+      AppLogger.error('Failed to get family info: $e', tag: 'ChildAppService');
       return null;
     }
   }
@@ -30,7 +31,7 @@ class ChildAppService {
       });
       return true;
     } catch (e) {
-      print('Failed to approve family code: $e');
+      AppLogger.error('Failed to approve family code: $e', tag: 'ChildAppService');
       return false;
     }
   }
@@ -69,7 +70,7 @@ class ChildAppService {
       
       return allRecordings;
     } catch (e) {
-      print('Failed to get recordings: $e');
+      AppLogger.error('Failed to get recordings: $e', tag: 'ChildAppService');
       return [];
     }
   }
@@ -102,7 +103,7 @@ class ChildAppService {
       
       return [];
     } catch (e) {
-      print('Failed to get recordings by date: $e');
+      AppLogger.error('Failed to get recordings by date: $e', tag: 'ChildAppService');
       return [];
     }
   }
@@ -157,7 +158,7 @@ class ChildAppService {
       }
       return null;
     } catch (e) {
-      print('Failed to get survival status: $e');
+      AppLogger.error('Failed to get survival status: $e', tag: 'ChildAppService');
       return null;
     }
   }
@@ -172,7 +173,7 @@ class ChildAppService {
       });
       return true;
     } catch (e) {
-      print('Failed to clear survival alert: $e');
+      AppLogger.error('Failed to clear survival alert: $e', tag: 'ChildAppService');
       return false;
     }
   }
@@ -226,7 +227,7 @@ class ChildAppService {
         'averagePerDay': daysWithRecordings > 0 ? totalRecordings / daysWithRecordings : 0,
       };
     } catch (e) {
-      print('Failed to get statistics: $e');
+      AppLogger.error('Failed to get statistics: $e', tag: 'ChildAppService');
       return {};
     }
   }

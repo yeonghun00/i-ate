@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class OverlayService {
   static const MethodChannel _channel = MethodChannel('overlay_service');
@@ -21,7 +22,7 @@ class OverlayService {
   static Future<bool> startInvisibleOverlay() async {
     try {
       if (!await hasOverlayPermission()) {
-        print('Overlay permission not granted');
+        AppLogger.warning('Overlay permission not granted', tag: 'OverlayService');
         return false;
       }
       
@@ -32,10 +33,10 @@ class OverlayService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('overlay_enabled', true);
       
-      print('Invisible overlay started for app persistence');
+      AppLogger.info('Invisible overlay started for app persistence', tag: 'OverlayService');
       return result ?? false;
     } catch (e) {
-      print('Failed to start invisible overlay: $e');
+      AppLogger.error('Failed to start invisible overlay: $e', tag: 'OverlayService');
       return false;
     }
   }
@@ -49,10 +50,10 @@ class OverlayService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('overlay_enabled', false);
       
-      print('Invisible overlay stopped');
+      AppLogger.info('Invisible overlay stopped', tag: 'OverlayService');
       return result ?? false;
     } catch (e) {
-      print('Failed to stop invisible overlay: $e');
+      AppLogger.error('Failed to stop invisible overlay: $e', tag: 'OverlayService');
       return false;
     }
   }
@@ -67,9 +68,9 @@ class OverlayService {
   static Future<void> initialize() async {
     if (await hasOverlayPermission()) {
       await startInvisibleOverlay();
-      print('Overlay service initialized with invisible overlay');
+      AppLogger.info('Overlay service initialized with invisible overlay', tag: 'OverlayService');
     } else {
-      print('Overlay service initialized without overlay (permission not granted)');
+      AppLogger.warning('Overlay service initialized without overlay (permission not granted)', tag: 'OverlayService');
     }
   }
 }

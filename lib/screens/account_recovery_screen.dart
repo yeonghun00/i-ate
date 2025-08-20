@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
-// DataRecoveryScreen import removed - using name + connection code only
+import 'package:thanks_everyday/screens/special_permission_guide_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
-import 'package:thanks_everyday/main.dart';
 
 class AccountRecoveryScreen extends StatefulWidget {
   final VoidCallback onRecoveryComplete;
@@ -61,11 +60,19 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
         // Wait a moment to show success message
         await Future.delayed(const Duration(seconds: 1));
         
-        // Navigate directly to HomePage after successful recovery
+        // CRITICAL FIX: Direct navigation to permission setup flow
+        // Account recovery users still need to grant permissions on this device
         if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const HomePage()),
-            (route) => false, // Remove all previous routes
+          // Import statement will be needed at the top
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => SpecialPermissionGuideScreen(
+                onPermissionsComplete: () {
+                  // After permissions are complete, call the original callback
+                  widget.onRecoveryComplete();
+                },
+              ),
+            ),
           );
         }
       } else if (result != null && result['error'] == 'multiple_matches') {
@@ -108,11 +115,18 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
         
         await Future.delayed(const Duration(seconds: 1));
         
-        // Navigate directly to HomePage after successful recovery
+        // CRITICAL FIX: Direct navigation to permission setup flow
+        // Account recovery users still need to grant permissions on this device  
         if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const HomePage()),
-            (route) => false, // Remove all previous routes
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => SpecialPermissionGuideScreen(
+                onPermissionsComplete: () {
+                  // After permissions are complete, call the original callback
+                  widget.onRecoveryComplete();
+                },
+              ),
+            ),
           );
         }
       } else {

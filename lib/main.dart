@@ -3,8 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:thanks_everyday/services/location_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Firebase imports removed - now handled via AppLogger and services
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
@@ -15,6 +14,7 @@ import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 import 'dart:async';
 
 void main() async {
@@ -24,9 +24,9 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    print('Firebase initialized successfully');
+    AppLogger.info('Firebase initialized successfully', tag: 'Main');
   } catch (e) {
-    print('Firebase initialization failed: $e');
+    AppLogger.error('Firebase initialization failed: $e', tag: 'Main');
     // Don't continue if Firebase fails - this will cause issues throughout the app
     throw Exception('Firebase initialization failed: $e');
   }
@@ -34,30 +34,30 @@ void main() async {
 
   try {
     await ScreenMonitorService.initialize();
-    print('ScreenMonitorService initialized successfully');
+    AppLogger.info('ScreenMonitorService initialized successfully', tag: 'Main');
   } catch (e) {
-    print('ScreenMonitorService initialization failed: $e');
+    AppLogger.warning('ScreenMonitorService initialization failed: $e', tag: 'Main');
   }
 
   try {
     await SmartUsageDetector.instance.initialize();
-    print('SmartUsageDetector initialized successfully');
+    AppLogger.info('SmartUsageDetector initialized successfully', tag: 'Main');
   } catch (e) {
-    print('SmartUsageDetector initialization failed: $e');
+    AppLogger.warning('SmartUsageDetector initialization failed: $e', tag: 'Main');
   }
 
   try {
     await OverlayService.initialize();
-    print('OverlayService initialized successfully');
+    AppLogger.info('OverlayService initialized successfully', tag: 'Main');
   } catch (e) {
-    print('OverlayService initialization failed: $e');
+    AppLogger.warning('OverlayService initialization failed: $e', tag: 'Main');
   }
 
   try {
     await MiuiBootHelper.initializeOnAppStart();
-    print('MiuiBootHelper initialized successfully');
+    AppLogger.info('MiuiBootHelper initialized successfully', tag: 'Main');
   } catch (e) {
-    print('MiuiBootHelper initialization failed: $e');
+    AppLogger.warning('MiuiBootHelper initialization failed: $e', tag: 'Main');
   }
 
   runApp(const ThanksEverydayApp());
@@ -106,49 +106,50 @@ class _AppWrapperState extends State<AppWrapper> {
       // Check if we have family code stored locally
       final hasFamilyCode = prefs.getString('family_code') != null;
 
-      print(
+      AppLogger.info(
         'Firebase setup: $isSetup, SharedPreferences setup: $setupComplete',
+        tag: 'AppWrapper',
       );
-      print('Has family code: $hasFamilyCode');
+      AppLogger.info('Has family code: $hasFamilyCode', tag: 'AppWrapper');
 
       // Auto-recovery with 8-digit codes removed - using name + connection code only
 
       // NEW: Auto-detection of existing accounts
       if (!isSetup && !setupComplete && !hasFamilyCode) {
-        print('No existing data found, attempting auto-detection of existing accounts...');
+        AppLogger.info('No existing data found, attempting auto-detection of existing accounts...', tag: 'AppWrapper');
         try {
           final candidates = await _firebaseService.autoDetectExistingAccounts();
           
           if (candidates.isNotEmpty) {
-            print('Auto-detection found ${candidates.length} potential account matches');
+            AppLogger.info('Auto-detection found ${candidates.length} potential account matches', tag: 'AppWrapper');
             
             // Show auto-detection results to user for selection
             // This could be implemented as a dialog or dedicated screen
             // For now, we'll log the results and continue with normal setup
             for (final candidate in candidates) {
-              print('  - ${candidate['elderlyName']} (${candidate['connectionCode']}) - Confidence: ${candidate['confidence']}');
+              AppLogger.debug('  - ${candidate['elderlyName']} (${candidate['connectionCode']}) - Confidence: ${candidate['confidence']}', tag: 'AppWrapper');
             }
             
             // Optional: If there's a high-confidence match (>80%), we could prompt the user
             final highConfidenceMatch = candidates.where((c) => c['confidence'] >= 0.8).toList();
             if (highConfidenceMatch.isNotEmpty) {
-              print('High-confidence account found: ${highConfidenceMatch.first['elderlyName']}');
+              AppLogger.info('High-confidence account found: ${highConfidenceMatch.first['elderlyName']}', tag: 'AppWrapper');
               // Could show a dialog here asking user if this is their account
             }
           } else {
-            print('Auto-detection found no potential matches');
+            AppLogger.info('Auto-detection found no potential matches', tag: 'AppWrapper');
           }
         } catch (e) {
-          print('Auto-detection error: $e');
+          AppLogger.warning('Auto-detection error: $e', tag: 'AppWrapper');
         }
       }
 
       // Be more lenient - if either Firebase OR SharedPreferences indicates setup is complete
       final actuallySetup = isSetup || setupComplete;
       
-      print('  - Firebase service setup: $isSetup');
-      print('  - SharedPreferences setup_complete: $setupComplete');
-      print('  - Final decision: $actuallySetup');
+      AppLogger.debug('  - Firebase service setup: $isSetup', tag: 'AppWrapper');
+      AppLogger.debug('  - SharedPreferences setup_complete: $setupComplete', tag: 'AppWrapper');
+      AppLogger.info('  - Final decision: $actuallySetup', tag: 'AppWrapper');
       
       setState(() {
         _isSetup = actuallySetup;
@@ -163,7 +164,7 @@ class _AppWrapperState extends State<AppWrapper> {
         });
       }
     } catch (e) {
-      print('App initialization failed: $e');
+      AppLogger.error('App initialization failed: $e', tag: 'AppWrapper');
       setState(() {
         _isLoading = false;
       });
@@ -171,7 +172,7 @@ class _AppWrapperState extends State<AppWrapper> {
   }
 
   void _onSetupComplete() async {
-    print('🎉 _onSetupComplete called, navigating to main page');
+    AppLogger.info('🎉 _onSetupComplete called, navigating to main page', tag: 'AppWrapper');
 
     // Store completion state in SharedPreferences as backup
     try {
@@ -184,7 +185,7 @@ class _AppWrapperState extends State<AppWrapper> {
       try {
         await _firebaseService.updateAlertSettings(alertMinutes: 12 * 60); // 12 hours in minutes
       } catch (e) {
-        print('Failed to update Firebase alert settings: $e');
+        AppLogger.warning('Failed to update Firebase alert settings: $e', tag: 'AppWrapper');
       }
       
       
@@ -192,18 +193,18 @@ class _AppWrapperState extends State<AppWrapper> {
       await _initializeServicesAfterSetup();
       
     } catch (e) {
-      print('Failed to store setup completion: $e');
+      AppLogger.error('Failed to store setup completion: $e', tag: 'AppWrapper');
     }
   }
   
   Future<void> _checkMiuiGuidance() async {
     try {
-      print('🔍 Checking if MIUI guidance should be shown...');
+      AppLogger.info('🔍 Checking if MIUI guidance should be shown...', tag: 'AppWrapper');
       
       // Check for post-boot activation first
       final needsPostBoot = await MiuiBootHelper.needsPostBootActivation();
       if (needsPostBoot && mounted) {
-        print('📱 Post-boot activation needed');
+        AppLogger.info('📱 Post-boot activation needed', tag: 'AppWrapper');
         await MiuiBootHelper.showPostBootActivationDialog(context);
         return;
       }
@@ -211,7 +212,7 @@ class _AppWrapperState extends State<AppWrapper> {
       // Check if MIUI setup guidance should be shown
       final shouldShow = await MiuiBootHelper.shouldShowMiuiGuidance();
       if (shouldShow && mounted) {
-        print('🚨 MIUI setup guidance required');
+        AppLogger.info('🚨 MIUI setup guidance required', tag: 'AppWrapper');
         
         // Delay slightly to ensure the UI is ready
         await Future.delayed(const Duration(milliseconds: 500));
@@ -220,11 +221,11 @@ class _AppWrapperState extends State<AppWrapper> {
           await MiuiBootHelper.showMiuiSetupDialog(context);
         }
       } else {
-        print('✅ No MIUI guidance required');
+        AppLogger.info('✅ No MIUI guidance required', tag: 'AppWrapper');
       }
       
     } catch (e) {
-      print('❌ Error checking MIUI guidance: $e');
+      AppLogger.error('❌ Error checking MIUI guidance: $e', tag: 'AppWrapper');
     }
   }
   
@@ -237,33 +238,33 @@ class _AppWrapperState extends State<AppWrapper> {
       final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
       final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
       
-      print('🔧 Initializing services after setup completion:');
-      print('  - Survival signal: $survivalEnabled');
-      print('  - Location tracking: $locationEnabled');
+      AppLogger.info('🔧 Initializing services after setup completion:', tag: 'AppWrapper');
+      AppLogger.info('  - Survival signal: $survivalEnabled', tag: 'AppWrapper');
+      AppLogger.info('  - Location tracking: $locationEnabled', tag: 'AppWrapper');
       
       if (survivalEnabled) {
         await ScreenMonitorService.enableSurvivalSignal();
-        print('✅ Survival signal monitoring enabled');
+        AppLogger.info('✅ Survival signal monitoring enabled', tag: 'AppWrapper');
         
         // Survival signal monitoring enabled - native service will handle background updates
-        print('✅ Survival signal monitoring enabled after setup');
+        AppLogger.info('✅ Survival signal monitoring enabled after setup', tag: 'AppWrapper');
       }
       
       if (locationEnabled) {
         await LocationService.setLocationTrackingEnabled(true);
-        print('✅ Location tracking enabled');
+        AppLogger.info('✅ Location tracking enabled', tag: 'AppWrapper');
         
         // Force immediate location update after setup
-        print('📍 Getting initial location after setup...');
+        AppLogger.info('📍 Getting initial location after setup...', tag: 'AppWrapper');
         final position = await LocationService.getCurrentLocation();
         if (position != null) {
-          print('✅ Initial location obtained: ${position.latitude}, ${position.longitude}');
+          AppLogger.info('✅ Initial location obtained: ${position.latitude}, ${position.longitude}', tag: 'AppWrapper');
         } else {
-          print('❌ Failed to get initial location');
+          AppLogger.warning('❌ Failed to get initial location', tag: 'AppWrapper');
         }
       }
     } catch (e) {
-      print('❌ Failed to initialize services after setup: $e');
+      AppLogger.error('❌ Failed to initialize services after setup: $e', tag: 'AppWrapper');
     }
     
     // Check for MIUI guidance after setup completion
@@ -274,25 +275,25 @@ class _AppWrapperState extends State<AppWrapper> {
       setState(() {
         _isSetup = true;
       });
-      print('State updated: _isSetup = true');
+      AppLogger.info('State updated: _isSetup = true', tag: 'AppWrapper');
     } else {
-      print('Widget not mounted, scheduling state update for next frame');
+      AppLogger.warning('Widget not mounted, scheduling state update for next frame', tag: 'AppWrapper');
       // Schedule the state update for the next frame when widget might be mounted
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           setState(() {
             _isSetup = true;
           });
-          print('State updated via post-frame callback: _isSetup = true');
+          AppLogger.info('State updated via post-frame callback: _isSetup = true', tag: 'AppWrapper');
         } else {
-          print('Widget still not mounted after post-frame callback');
+          AppLogger.warning('Widget still not mounted after post-frame callback', tag: 'AppWrapper');
           // Force rebuild the entire widget tree
           scheduleMicrotask(() {
             if (mounted) {
               setState(() {
                 _isSetup = true;
               });
-              print('State updated via microtask: _isSetup = true');
+              AppLogger.info('State updated via microtask: _isSetup = true', tag: 'AppWrapper');
             }
           });
         }
@@ -302,8 +303,9 @@ class _AppWrapperState extends State<AppWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    print(
+    AppLogger.debug(
       'AppWrapper build called - isLoading: $_isLoading, isSetup: $_isSetup',
+      tag: 'AppWrapper',
     );
 
     if (_isLoading) {
@@ -317,11 +319,11 @@ class _AppWrapperState extends State<AppWrapper> {
     }
 
     if (!_isSetup) {
-      print('Returning InitialSetupScreen');
+      AppLogger.debug('Returning InitialSetupScreen', tag: 'AppWrapper');
       return InitialSetupScreen(onSetupComplete: _onSetupComplete);
     }
 
-    print('Returning HomePage');
+    AppLogger.debug('Returning HomePage', tag: 'AppWrapper');
     return const HomePage();
   }
 }
@@ -336,7 +338,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final FirebaseService _firebaseService = FirebaseService();
   int _todayMealCount = 0;
-  DateTime? _lastMealTime;
+  // _lastMealTime removed - not used in current implementation
   final int _maxMealsPerDay = 3;
   bool _isSaving = false;
 
@@ -352,9 +354,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _updateActivityInFirebase() async {
     try {
       await _firebaseService.updatePhoneActivity();
-      print('App is active - phone activity updated in Firebase');
+      AppLogger.info('App is active - phone activity updated in Firebase', tag: 'HomePage');
     } catch (e) {
-      print('Failed to update phone activity: $e');
+      AppLogger.warning('Failed to update phone activity: $e', tag: 'HomePage');
     }
   }
 
@@ -365,62 +367,57 @@ class _HomePageState extends State<HomePage> {
         _todayMealCount = count;
       });
     } catch (e) {
-      print('Failed to load todays meal count: $e');
+      AppLogger.warning('Failed to load todays meal count: $e', tag: 'HomePage');
     }
   }
 
   Future<void> _loadMealData() async {
-    try {
-      _lastMealTime = await FoodTrackingService.getLastFoodIntake();
-      setState(() {});
-    } catch (e) {
-      print('식사 데이터 로드 실패: $e');
-    }
+    // Meal timing data is now handled directly in the UI components
   }
 
   Future<void> _initializeServices() async {
     try {
-      print('🔧 Starting service initialization...');
+      AppLogger.info('🔧 Starting service initialization...', tag: 'HomePage');
       
       final prefs = await SharedPreferences.getInstance();
       final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
       final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
       
-      print('🔧 Initializing ScreenMonitorService...');
+      AppLogger.info('🔧 Initializing ScreenMonitorService...', tag: 'HomePage');
       await ScreenMonitorService.initialize();
-      print('✅ ScreenMonitorService.initialize() completed');
+      AppLogger.info('✅ ScreenMonitorService.initialize() completed', tag: 'HomePage');
       
       await LocationService.initialize();
       await FoodTrackingService.initialize();
       
       if (survivalEnabled) {
-        print('🔧 Enabling survival signal...');
+        AppLogger.info('🔧 Enabling survival signal...', tag: 'HomePage');
         await ScreenMonitorService.enableSurvivalSignal();
-        print('✅ Survival signal enabled');
+        AppLogger.info('✅ Survival signal enabled', tag: 'HomePage');
         
-        print('🔄 Starting WorkManager for background updates...');
+        AppLogger.info('🔄 Starting WorkManager for background updates...', tag: 'HomePage');
         await ScreenMonitorService.startMonitoring();
-        print('✅ WorkManager scheduled for 15-minute updates');
+        AppLogger.info('✅ WorkManager scheduled for 15-minute updates', tag: 'HomePage');
         
-        print('✅ Background phone activity monitoring started');
+        AppLogger.info('✅ Background phone activity monitoring started', tag: 'HomePage');
       } else {
-        print('❌ Survival signal is disabled in preferences');
+        AppLogger.info('❌ Survival signal is disabled in preferences', tag: 'HomePage');
       }
       
       if (locationEnabled) {
         await LocationService.setLocationTrackingEnabled(true);
-        print('✅ Location tracking started');
+        AppLogger.info('✅ Location tracking started', tag: 'HomePage');
         
-        print('📍 Getting immediate location...');
+        AppLogger.info('📍 Getting immediate location...', tag: 'HomePage');
         final position = await LocationService.getCurrentLocation();
         if (position != null) {
-          print('✅ Location updated: ${position.latitude}, ${position.longitude}');
+          AppLogger.info('✅ Location updated: ${position.latitude}, ${position.longitude}', tag: 'HomePage');
         } else {
-          print('❌ Failed to get location');
+          AppLogger.warning('❌ Failed to get location', tag: 'HomePage');
         }
       }
     } catch (e) {
-      print('❌ Service initialization failed: $e');
+      AppLogger.error('❌ Service initialization failed: $e', tag: 'HomePage');
     }
   }
 
@@ -439,24 +436,17 @@ class _HomePageState extends State<HomePage> {
     HapticFeedback.mediumImpact();
 
     try {
-      print('🔥 Testing Firebase Auth: ${FirebaseAuth.instance.currentUser?.uid}');
-      print('🔥 Testing Firestore connection...');
+      // Firebase connection is already established and verified during app initialization
       
-      await FirebaseFirestore.instance.collection('test').doc('connectivity').set({
-        'timestamp': FieldValue.serverTimestamp(),
-        'test': true,
-      });
-      print('🔥 Firebase connection OK!');
-      
-      print('🍽️ Starting meal recording...');
+      AppLogger.info('🍽️ Starting meal recording...', tag: 'HomePage');
       final success = await FoodTrackingService.recordFoodIntake();
-      print('📱 Local food service result: $success');
+      AppLogger.info('📱 Local food service result: $success', tag: 'HomePage');
       
       final firebaseSuccess = await _firebaseService.saveMealRecord(
         timestamp: DateTime.now(),
         mealNumber: _todayMealCount + 1,
       );
-      print('🔥 Firebase service result: $firebaseSuccess');
+      AppLogger.info('🔥 Firebase service result: $firebaseSuccess', tag: 'HomePage');
 
       if (success && firebaseSuccess) {
         await _loadTodayMealCount();
@@ -471,7 +461,7 @@ class _HomePageState extends State<HomePage> {
         _showMessage('기록 실패. 다시 시도해주세요.');
       }
     } catch (e) {
-      print('식사 기록 실패: $e');
+      AppLogger.error('식사 기록 실패: $e', tag: 'HomePage');
       _showMessage('기록 중 오류가 발생했습니다.');
     } finally {
       setState(() {

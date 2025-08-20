@@ -7,6 +7,7 @@ import 'package:thanks_everyday/theme/app_theme.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 import 'dart:io';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class SpecialPermissionGuideScreen extends StatefulWidget {
   final VoidCallback onPermissionsComplete;
@@ -48,7 +49,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     // Detect if this is a MIUI device (Xiaomi/Redmi)
     if (Platform.isAndroid) {
       _isMiuiDevice = await _isXiaomiDevice();
-      print('MIUI device detected: $_isMiuiDevice');
+      AppLogger.info('MIUI device detected: $_isMiuiDevice', tag: 'SpecialPermissionGuideScreen');
       setState(() {}); // Update UI after detection
     }
   }
@@ -59,7 +60,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       final bool isMiui = await platform.invokeMethod('isMiuiDevice');
       return isMiui;
     } catch (e) {
-      print('Error detecting MIUI device: $e');
+      AppLogger.error('Error detecting MIUI device: $e', tag: 'SpecialPermissionGuideScreen');
       return false; // Default to false if detection fails
     }
   }
@@ -74,7 +75,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // When user comes back from settings, check permissions
     if (state == AppLifecycleState.resumed) {
-      print('App resumed, checking permissions...');
+      AppLogger.debug('App resumed, checking permissions...', tag: 'SpecialPermissionGuideScreen');
       _checkPermissions();
     }
   }
@@ -87,7 +88,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     });
 
     try {
-      print('Checking permissions...');
+      AppLogger.debug('Checking permissions...', tag: 'SpecialPermissionGuideScreen');
       
       // Check all permissions
       final backgroundLocationStatus = await Permission.locationAlways.status;
@@ -98,10 +99,10 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       final backgroundLocationGranted = backgroundLocationStatus.isGranted;
       final overlayGranted = overlayStatus.isGranted;
       
-      print('Background location permission: $backgroundLocationGranted');
-      print('Overlay permission: $overlayGranted');
-      print('Usage stats permission: $hasUsagePermission');
-      print('Battery optimization disabled: $hasBatteryPermission');
+      AppLogger.debug('Background location permission: $backgroundLocationGranted', tag: 'SpecialPermissionGuideScreen');
+      AppLogger.debug('Overlay permission: $overlayGranted', tag: 'SpecialPermissionGuideScreen');
+      AppLogger.debug('Usage stats permission: $hasUsagePermission', tag: 'SpecialPermissionGuideScreen');
+      AppLogger.debug('Battery optimization disabled: $hasBatteryPermission', tag: 'SpecialPermissionGuideScreen');
       
       if (mounted) {
         // Only update state if permissions have actually changed
@@ -147,10 +148,10 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           _isChecking = false;
         }
         
-        print('UI updated: currentStep=$_currentStep');
+        AppLogger.debug('UI updated: currentStep=$_currentStep', tag: 'SpecialPermissionGuideScreen');
       }
     } catch (e) {
-      print('Error checking permissions: $e');
+      AppLogger.error('Error checking permissions: $e', tag: 'SpecialPermissionGuideScreen');
       if (mounted) {
         setState(() {
           _isChecking = false;
@@ -160,7 +161,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
   }
 
   Future<void> _requestPermissions() async {
-    print('Requesting permissions for step: $_currentStep');
+    AppLogger.debug('Requesting permissions for step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
     
     try {
       if (_currentStep == 0) {
@@ -186,17 +187,17 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       // Check permissions again
       await _checkPermissions();
     } catch (e) {
-      print('Error requesting permissions: $e');
+      AppLogger.error('Error requesting permissions: $e', tag: 'SpecialPermissionGuideScreen');
     }
   }
 
 
   Future<void> _requestBackgroundLocationPermission() async {
-    print('🔄 Starting two-step background location permission flow...');
+    AppLogger.debug('Starting two-step background location permission flow...', tag: 'SpecialPermissionGuideScreen');
     
     try {
       // Step 1: Request foreground location permissions first
-      print('Step 1: Requesting foreground location permission...');
+      AppLogger.debug('Step 1: Requesting foreground location permission...', tag: 'SpecialPermissionGuideScreen');
       final foregroundResults = await [
         Permission.locationWhenInUse,
         Permission.location,
@@ -206,15 +207,15 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                                 foregroundResults[Permission.location]?.isGranted == true;
       
       if (!foregroundGranted) {
-        print('❌ Foreground location permission denied');
+        AppLogger.warning('Foreground location permission denied', tag: 'SpecialPermissionGuideScreen');
         _showMessage('위치 권한이 필요합니다. 설정에서 위치 권한을 허용해주세요.');
         return;
       }
       
-      print('✅ Step 1 completed: Foreground location permission granted');
+      AppLogger.debug('Step 1 completed: Foreground location permission granted', tag: 'SpecialPermissionGuideScreen');
       
       // Step 2: Now request background location permission
-      print('Step 2: Requesting background location permission...');
+      AppLogger.debug('Step 2: Requesting background location permission...', tag: 'SpecialPermissionGuideScreen');
       await Future.delayed(const Duration(milliseconds: 500));
       
       final backgroundResult = await Permission.locationAlways.request();
@@ -224,27 +225,27 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       });
       
       if (_backgroundLocationGranted) {
-        print('🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!');
+        AppLogger.info('SUCCESS: Background location permission GRANTED - "Always allow" was selected!', tag: 'SpecialPermissionGuideScreen');
         _showMessage('✅ 위치 권한이 설정되었습니다! GPS 추적이 활성화됩니다.');
       } else {
-        print('⚠️ Background location permission DENIED - user selected "While using app" or denied');
+        AppLogger.warning('Background location permission DENIED - user selected "While using app" or denied', tag: 'SpecialPermissionGuideScreen');
         _showMessage('⚠️ "항상 허용"을 선택해야 GPS 추적이 제대로 작동합니다.');
       }
       
     } catch (e) {
-      print('Error in background location permission flow: $e');
+      AppLogger.error('Error in background location permission flow: $e', tag: 'SpecialPermissionGuideScreen');
       _showMessage('권한 요청 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
   }
 
   // Manual refresh method for when user wants to check permissions
   Future<void> _refreshPermissions() async {
-    print('Manual permission refresh requested');
+    AppLogger.debug('Manual permission refresh requested', tag: 'SpecialPermissionGuideScreen');
     await _checkPermissions();
   }
 
   void _nextStep() {
-    print('_nextStep called, currentStep: $_currentStep');
+    AppLogger.debug('_nextStep called, currentStep: $_currentStep', tag: 'SpecialPermissionGuideScreen');
     
     if (_currentStep == 0) {
       // Check if background location permission is granted before advancing
@@ -252,9 +253,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         setState(() {
           _currentStep = 1;
         });
-        print('Advanced to step: $_currentStep');
+        AppLogger.debug('Advanced to step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
       } else {
-        print('Cannot advance - background location permission not granted');
+        AppLogger.warning('Cannot advance - background location permission not granted', tag: 'SpecialPermissionGuideScreen');
       }
     } else if (_currentStep == 1) {
       // Check if overlay permission is granted before advancing
@@ -262,9 +263,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         setState(() {
           _currentStep = 2;
         });
-        print('Advanced to step: $_currentStep');
+        AppLogger.debug('Advanced to step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
       } else {
-        print('Cannot advance - overlay permission not granted');
+        AppLogger.warning('Cannot advance - overlay permission not granted', tag: 'SpecialPermissionGuideScreen');
       }
     } else if (_currentStep == 2) {
       // Check if usage permission is granted before advancing
@@ -272,9 +273,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         setState(() {
           _currentStep = 3;
         });
-        print('Advanced to step: $_currentStep');
+        AppLogger.debug('Advanced to step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
       } else {
-        print('Cannot advance - usage permission not granted');
+        AppLogger.warning('Cannot advance - usage permission not granted', tag: 'SpecialPermissionGuideScreen');
       }
     } else if (_currentStep == 3) {
       // Check if battery permission is granted before advancing
@@ -282,9 +283,9 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         setState(() {
           _currentStep = _isMiuiDevice ? 4 : 5; // MIUI step or completion
         });
-        print('Advanced to step: $_currentStep');
+        AppLogger.debug('Advanced to step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
       } else {
-        print('Cannot advance - battery permission not granted');
+        AppLogger.warning('Cannot advance - battery permission not granted', tag: 'SpecialPermissionGuideScreen');
       }
     } else if (_currentStep == 4 && _isMiuiDevice) {
       // MIUI autostart permission step
@@ -292,7 +293,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         _miuiAutostartPermissionAcknowledged = true;
         _currentStep = 5; // Completion step for MIUI devices
       });
-      print('MIUI autostart permission acknowledged, advanced to step: $_currentStep');
+      AppLogger.info('MIUI autostart permission acknowledged, advanced to step: $_currentStep', tag: 'SpecialPermissionGuideScreen');
     } else if (_currentStep >= 4) {
       // All done - navigate to main page
       _completeSetup();
@@ -310,21 +311,21 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
       }
     } catch (e) {
-      print('Error opening autostart settings: $e');
+      AppLogger.error('Error opening autostart settings: $e', tag: 'SpecialPermissionGuideScreen');
       _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
     }
   }
 
   void _completeSetup() async {
-    print('_completeSetup called, navigating to main page');
-    print('Current widget mounted: $mounted');
-    print('Current permissions - usage: $_hasUsagePermission, battery: $_hasBatteryPermission');
+    AppLogger.debug('_completeSetup called, navigating to main page', tag: 'SpecialPermissionGuideScreen');
+    AppLogger.debug('Current widget mounted: $mounted', tag: 'SpecialPermissionGuideScreen');
+    AppLogger.debug('Current permissions - usage: $_hasUsagePermission, battery: $_hasBatteryPermission', tag: 'SpecialPermissionGuideScreen');
     
     // Ensure we have all permissions before proceeding
     if (!_backgroundLocationGranted || !_overlayGranted || 
         !_hasUsagePermission || !_hasBatteryPermission || 
         (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
-      print('Not all permissions granted - cannot complete setup');
+      AppLogger.warning('Not all permissions granted - cannot complete setup', tag: 'SpecialPermissionGuideScreen');
       if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
         _showMessage('MIUI 자동 시작 권한 안내를 확인해주세요.');
       } else {
@@ -337,34 +338,35 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('setup_complete', true);
-      print('Setup completion stored in SharedPreferences');
+      AppLogger.info('Setup completion stored in SharedPreferences', tag: 'SpecialPermissionGuideScreen');
     } catch (e) {
-      print('Failed to store setup completion: $e');
+      AppLogger.error('Failed to store setup completion: $e', tag: 'SpecialPermissionGuideScreen');
     }
     
-    // Try direct navigation to HomePage bypassing callback chain
+    // CRITICAL FIX: Call callback to initialize services without waiting for async operations
+    // This ensures proper service initialization synchronously
     try {
-      print('Attempting direct navigation to HomePage...');
-      if (mounted) {
-        // Navigate directly to HomePage and clear all previous routes
+      AppLogger.debug('Calling onPermissionsComplete callback for service initialization...', tag: 'SpecialPermissionGuideScreen');
+      widget.onPermissionsComplete();
+      AppLogger.debug('onPermissionsComplete callback executed synchronously', tag: 'SpecialPermissionGuideScreen');
+    } catch (e) {
+      AppLogger.error('Callback execution failed: $e', tag: 'SpecialPermissionGuideScreen');
+    }
+    
+    // Navigate immediately without any delay - this is the critical fix
+    if (mounted) {
+      AppLogger.debug('Navigating to HomePage immediately after callback', tag: 'SpecialPermissionGuideScreen');
+      try {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const HomePage()),
           (route) => false,
         );
-        print('Direct navigation to HomePage completed');
-        return;
+        AppLogger.debug('Navigation to HomePage completed successfully', tag: 'SpecialPermissionGuideScreen');
+      } catch (navError) {
+        AppLogger.error('Navigation failed: $navError', tag: 'SpecialPermissionGuideScreen');
       }
-    } catch (e) {
-      print('Direct navigation failed: $e');
-    }
-    
-    // Fallback to callback approach
-    try {
-      print('Calling onPermissionsComplete callback...');
-      widget.onPermissionsComplete();
-      print('onPermissionsComplete callback executed successfully');
-    } catch (e) {
-      print('Callback approach failed: $e');
+    } else {
+      AppLogger.warning('Widget not mounted, cannot navigate', tag: 'SpecialPermissionGuideScreen');
     }
   }
 
@@ -1254,7 +1256,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           // Non-MIUI completion button
           return GestureDetector(
             onTap: () {
-              print('앱 사용 시작하기 button clicked');
+              AppLogger.debug('앱 사용 시작하기 button clicked', tag: 'SpecialPermissionGuideScreen');
               _completeSetup();
             },
             child: Container(
@@ -1292,7 +1294,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       case 5: // MIUI completion
         return GestureDetector(
           onTap: () {
-            print('MIUI 앱 사용 시작하기 button clicked');
+            AppLogger.debug('MIUI 앱 사용 시작하기 button clicked', tag: 'SpecialPermissionGuideScreen');
             _completeSetup();
           },
           child: Container(

@@ -123,9 +123,19 @@ class AccountRecoveryService with AppLogger {
       await prefs.setString(AppConstants.keyFamilyId, match['familyId']);
       await prefs.setString(AppConstants.keyFamilyCode, data['connectionCode']);
       await prefs.setString(AppConstants.keyElderlyName, data['elderlyName']);
-      await prefs.setBool(AppConstants.keySetupComplete, true);
+      // CRITICAL FIX: Don't mark setup complete - user still needs to grant permissions
+      // await prefs.setBool(AppConstants.keySetupComplete, true);
       
-      logInfo('Local data restored successfully');
+      // CRITICAL FIX: Set default service preferences for account recovery users
+      // These preferences are essential for proper service initialization after permission setup
+      await prefs.setBool(AppConstants.keySurvivalSignalEnabled, true); // Enable survival signal by default
+      await prefs.setBool(AppConstants.keyLocationTrackingEnabled, true); // Enable GPS tracking by default  
+      await prefs.setInt(AppConstants.keyAlertHours, 12); // Default 12-hour alert threshold
+      
+      logInfo('Local data and default service preferences restored successfully');
+      logInfo('  - Survival signal: enabled (default)');
+      logInfo('  - Location tracking: enabled (default)'); 
+      logInfo('  - Alert threshold: 12 hours (default)');
     } catch (e) {
       logError('Failed to restore local data', error: e);
       throw e;
@@ -140,7 +150,7 @@ class AccountRecoveryService with AppLogger {
       'familyId': match['familyId'],
       'connectionCode': data['connectionCode'],
       'elderlyName': data['elderlyName'],
-      'mealCount': data['todayMealCount'] ?? 0,
+      'mealCount': (data['lastMeal'] as Map?)?['count'] ?? 0,
       'matchScore': match['matchScore'],
     };
   }
@@ -175,7 +185,7 @@ class AccountRecoveryService with AppLogger {
             'connectionCode': data['connectionCode'],
             'confidence': confidence,
             'lastActivity': data['lastPhoneActivity'],
-            'mealCount': data['todayMealCount'] ?? 0,
+            'mealCount': (data['lastMeal'] as Map?)?['count'] ?? 0,
           });
         }
       }
@@ -219,7 +229,7 @@ class AccountRecoveryService with AppLogger {
     }
     
     // Check meal records
-    final mealCount = data['todayMealCount'] ?? 0;
+    final mealCount = (data['lastMeal'] as Map?)?['count'] ?? 0;
     if (mealCount > 0) {
       confidence += 0.2;
     }

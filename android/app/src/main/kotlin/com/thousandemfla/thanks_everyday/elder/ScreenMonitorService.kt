@@ -20,8 +20,8 @@ class ScreenMonitorService : Service() {
     
     companion object {
         private const val TAG = "ScreenMonitorService"
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "screen_monitor_channel"
+        private const val NOTIFICATION_ID = 1001 // Shared with GpsTrackingService
+        private const val CHANNEL_ID = "health_monitoring_channel" // Shared channel
         
         fun startService(context: Context) {
             try {
@@ -230,7 +230,7 @@ class ScreenMonitorService : Service() {
             }
             
             Log.d(TAG, "✅ ScreenMonitorService running as foreground service for app persistence")
-            Log.d(TAG, "✅ Notification should now show: '안전 모니터링 활성 : 휴대폰 사용 감지 중...'")
+            Log.d(TAG, "✅ Notification should now show: '가족과 함께하는 안전한 일상 : 안전 확인 서비스가 활성화되어 있습니다'")
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error during service startup: ${e.message}")
@@ -253,8 +253,8 @@ class ScreenMonitorService : Service() {
         return if (MiuiPermissionHelper.isMiuiDevice()) {
             // MIUI-specific notification with enhanced visibility
             NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("안전 모니터링 활성")
-                .setContentText("휴대폰 사용 감지 중...")
+                .setContentTitle("가족과 함께하는 안전한 일상")
+                .setContentText("안전 확인 서비스가 활성화되어 있습니다")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for MIUI
                 .setOngoing(true)
@@ -334,11 +334,13 @@ class ScreenMonitorService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Screen Monitor Service",
+                "건강 안전 서비스",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors screen unlock events for survival signal"
+                description = "가족과 함께하는 안전한 일상을 위한 서비스입니다"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
             
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -347,13 +349,25 @@ class ScreenMonitorService : Service() {
     }
     
     private fun createNotification(): Notification {
+        // Check if GPS tracking is also active to create combined notification
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
+        
+        val title = "가족과 함께하는 안전한 일상"
+        val text = if (locationEnabled) {
+            "위치 공유와 안전 확인 서비스가 활성화되어 있습니다"
+        } else {
+            "안전 확인 서비스가 활성화되어 있습니다"
+        }
+        
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("안전 모니터링 활성")
-            .setContentText("휴대폰 사용 감지 중...")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setShowWhen(false)
+            .setAutoCancel(false)
             .build()
     }
     

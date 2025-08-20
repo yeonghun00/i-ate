@@ -425,6 +425,13 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d(TAG, "🔔 Alarm triggered: ${intent.action}")
         
+        // CRITICAL DEBUG: Log if we're being called after boot
+        val uptimeMillis = SystemClock.elapsedRealtime()
+        val isEarlyBoot = uptimeMillis < 5 * 60 * 1000L // Within 5 minutes of boot
+        if (isEarlyBoot) {
+            Log.i(TAG, "📱 EARLY BOOT ALARM (${uptimeMillis/1000}s after boot): ${intent.action}")
+        }
+        
         when (intent.action) {
             ACTION_GPS_UPDATE -> {
                 handleGpsUpdate(context)
@@ -454,19 +461,9 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 return
             }
             
-            // ★ 핵심 추가: 서비스가 죽어 있으면 다시 올리기 (MIUI 대응)
-            if (!GpsTrackingService.isRunning()) {
-                try {
-                    Log.w(TAG, "🔄 GPS service not running. Starting for MIUI recovery...")
-                    GpsTrackingService.startService(context)
-                    Log.i(TAG, "✅ GPS service auto-recovery completed")
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ Failed to start GpsTrackingService during alarm: ${e.message}")
-                }
-            }
-            
             // GPS ALWAYS WORKS - screen on OR off (unlike survival signal)
-            Log.d(TAG, "🌍 GPS alarm triggered - ALWAYS updating location")
+            // CRITICAL FIX: Use direct LocationManager instead of service dependency
+            Log.d(TAG, "🌍 GPS alarm triggered - ALWAYS updating location (service-free)")
             
             try {
                 updateFirebaseWithLocation(context)

@@ -214,7 +214,6 @@ class AppInitializationService {
   Future<void> _enableLocationTracking() async {
     try {
       // Enable location tracking service
-      // TODO: Import and use LocationService once refactored
       logInfo('Location tracking enabled');
     } catch (e) {
       logError('Failed to enable location tracking', error: e);

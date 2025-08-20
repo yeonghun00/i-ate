@@ -5,6 +5,9 @@ import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/location_service.dart';
 import 'package:thanks_everyday/services/food_tracking_service.dart';
+import 'package:thanks_everyday/services/permission_manager_service.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
+import 'package:thanks_everyday/widgets/permission_guide_widget.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onDataDeleted;
@@ -31,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   String? _familyContact;
   bool _locationTrackingEnabled = false;
   int _foodAlertHours = 8;
+  PermissionStatusInfo? _permissionStatus;
 
   @override
   void initState() {
@@ -50,7 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     super.didChangeAppLifecycleState(state);
     // When app resumes, check if permissions changed in system settings
     if (state == AppLifecycleState.resumed) {
-      print('🔄 App resumed - checking if GPS permissions changed...');
+      AppLogger.debug('App resumed - checking if GPS permissions changed...', tag: 'SettingsScreen');
       _loadSettings();
     }
   }
@@ -70,12 +74,13 @@ class _SettingsScreenState extends State<SettingsScreen>
           savedLocationEnabled && hasBackgroundLocationPermission;
 
       if (savedLocationEnabled && !hasBackgroundLocationPermission) {
-        print(
-          '⚠️ GPS was enabled but background location permission is missing - disabling',
-        );
+        AppLogger.warning('GPS was enabled but background location permission is missing - disabling', tag: 'SettingsScreen');
         await prefs.setBool('flutter.location_tracking_enabled', false);
         await LocationService.setLocationTrackingEnabled(false);
       }
+
+      // Check all permissions status
+      final permissionStatus = await PermissionManagerService.checkAllPermissions();
 
       setState(() {
         _familyCode = _firebaseService.familyCode;
@@ -87,9 +92,10 @@ class _SettingsScreenState extends State<SettingsScreen>
         _familyContact = prefs.getString('family_contact');
         _locationTrackingEnabled = actualLocationEnabled;
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
+        _permissionStatus = permissionStatus;
       });
     } catch (e) {
-      print('Failed to load settings: $e');
+      AppLogger.error('Failed to load settings: $e', tag: 'SettingsScreen');
     }
   }
 
@@ -161,17 +167,15 @@ class _SettingsScreenState extends State<SettingsScreen>
       await prefs.clear();
 
       _showMessage('모든 데이터가 삭제되었습니다.');
-      print('All data deleted successfully');
+      AppLogger.info('All data deleted successfully', tag: 'SettingsScreen');
     } catch (e) {
-      print('Error deleting data: $e');
+      AppLogger.error('Error deleting data: $e', tag: 'SettingsScreen');
       _showMessage('데이터 삭제 중 오류가 발생했습니다.');
     }
   }
 
   Future<void> _updateSettings() async {
-    print(
-      'Updating settings - survivalSignal: $_survivalSignalEnabled, alertHours: $_alertHours',
-    );
+    AppLogger.info('Updating settings - survivalSignal: $_survivalSignalEnabled, alertHours: $_alertHours', tag: 'SettingsScreen');
 
     try {
       // Update local settings first
@@ -181,26 +185,26 @@ class _SettingsScreenState extends State<SettingsScreen>
         _survivalSignalEnabled,
       );
       await prefs.setInt('alert_hours', _alertHours);
-      print('Local settings updated successfully');
+      AppLogger.info('Local settings updated successfully', tag: 'SettingsScreen');
 
       // Update screen monitoring service
       try {
         if (_survivalSignalEnabled) {
           await ScreenMonitorService.enableSurvivalSignal();
-          print('Survival signal enabled');
+          AppLogger.info('Survival signal enabled', tag: 'SettingsScreen');
         } else {
           await ScreenMonitorService.disableSurvivalSignal();
-          print('Survival signal disabled');
+          AppLogger.info('Survival signal disabled', tag: 'SettingsScreen');
         }
       } catch (e) {
-        print('Error updating screen monitor service: $e');
+        AppLogger.error('Error updating screen monitor service: $e', tag: 'SettingsScreen');
         // Don't fail the entire update if screen monitoring fails
       }
 
       // Update Firebase settings
       if (_familyCode != null) {
         try {
-          print('Updating Firebase settings for family code: $_familyCode');
+          AppLogger.info('Updating Firebase settings for family code: $_familyCode', tag: 'SettingsScreen');
           final success = await _firebaseService.updateFamilySettings(
             survivalSignalEnabled: _survivalSignalEnabled,
             familyContact: _familyContact ?? '',
@@ -208,21 +212,21 @@ class _SettingsScreenState extends State<SettingsScreen>
           );
 
           if (success) {
-            print('Firebase settings updated successfully');
+            AppLogger.info('Firebase settings updated successfully', tag: 'SettingsScreen');
           } else {
-            print('Firebase settings update failed');
+            AppLogger.warning('Firebase settings update failed', tag: 'SettingsScreen');
           }
         } catch (e) {
-          print('Error updating Firebase settings: $e');
+          AppLogger.error('Error updating Firebase settings: $e', tag: 'SettingsScreen');
           // Don't fail the entire update if Firebase fails
         }
       } else {
-        print('No family code found, skipping Firebase update');
+        AppLogger.warning('No family code found, skipping Firebase update', tag: 'SettingsScreen');
       }
 
       _showMessage('설정이 저장되었습니다.');
     } catch (e) {
-      print('Error updating settings: $e');
+      AppLogger.error('Error updating settings: $e', tag: 'SettingsScreen');
       _showMessage('설정 저장 중 오류가 발생했습니다: ${e.toString()}');
     }
   }
@@ -242,7 +246,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
       _showMessage('위치 추적 설정이 저장되었습니다.');
     } catch (e) {
-      print('Error updating location settings: $e');
+      AppLogger.error('Error updating location settings: $e', tag: 'SettingsScreen');
       _showMessage('위치 설정 저장 중 오류가 발생했습니다.');
     }
   }
@@ -257,7 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
       _showMessage('식사 알림 설정이 저장되었습니다.');
     } catch (e) {
-      print('Error updating food settings: $e');
+      AppLogger.error('Error updating food settings: $e', tag: 'SettingsScreen');
       _showMessage('식사 설정 저장 중 오류가 발생했습니다.');
     }
   }
@@ -364,6 +368,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                 ],
               ),
 
+              const SizedBox(height: 30),
+
+              // Permission Status Section
+              if (_permissionStatus != null) _buildPermissionSection(),
+              
               const SizedBox(height: 30),
 
               // Account Actions Section
@@ -752,15 +761,13 @@ class _SettingsScreenState extends State<SettingsScreen>
     PermissionStatus status = await Permission.locationAlways.status;
     bool granted = status.isGranted;
 
-    print(
-      '📍 Background location permission status: $status (granted: $granted)',
-    );
+    AppLogger.debug('Background location permission status: $status (granted: $granted)', tag: 'SettingsScreen');
     return granted;
   }
 
   // Request background location permission with proper two-step flow
   Future<bool> _requestBackgroundLocationPermission() async {
-    print('🔄 Starting two-step background location permission flow...');
+    AppLogger.debug('Starting two-step background location permission flow...', tag: 'SettingsScreen');
 
     // Step 1: Request foreground location permissions first
     Map<Permission, PermissionStatus> foregroundStatuses = await [
@@ -773,11 +780,11 @@ class _SettingsScreenState extends State<SettingsScreen>
         foregroundStatuses[Permission.location]?.isGranted == true;
 
     if (!foregroundGranted) {
-      print('❌ Foreground location permission denied');
+      AppLogger.warning('Foreground location permission denied', tag: 'SettingsScreen');
       return false;
     }
 
-    print('✅ Step 1 completed: Foreground location permission granted');
+    AppLogger.debug('Step 1 completed: Foreground location permission granted', tag: 'SettingsScreen');
 
     // Step 2: Now request background location permission (this shows "Always allow" option)
     await Future.delayed(const Duration(milliseconds: 500));
@@ -787,16 +794,10 @@ class _SettingsScreenState extends State<SettingsScreen>
     bool backgroundGranted = backgroundStatus.isGranted;
 
     if (backgroundGranted) {
-      print(
-        '🎉 SUCCESS: Background location permission GRANTED - "Always allow" was selected!',
-      );
-      print(
-        '✅ GPS will now work continuously every 2 minutes even when app is killed',
-      );
+      AppLogger.info('SUCCESS: Background location permission GRANTED - "Always allow" was selected!', tag: 'SettingsScreen');
+      AppLogger.info('GPS will now work continuously every 2 minutes even when app is killed', tag: 'SettingsScreen');
     } else {
-      print(
-        '⚠️ Background location permission DENIED - user selected "While using app" or denied',
-      );
+      AppLogger.warning('Background location permission DENIED - user selected "While using app" or denied', tag: 'SettingsScreen');
     }
 
     return backgroundGranted;
@@ -833,5 +834,254 @@ class _SettingsScreenState extends State<SettingsScreen>
         );
       },
     );
+  }
+
+  /// Build permission status section
+  Widget _buildPermissionSection() {
+    final status = _permissionStatus!;
+    
+    return _buildSection(
+      title: '권한 상태',
+      children: [
+        // Overall status
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: status.allRequiredGranted
+                ? const Color(0xFFDCFDF7)
+                : const Color(0xFFFFF3CD),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: status.allRequiredGranted
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFFFE69C),
+              width: 2,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                status.allRequiredGranted
+                    ? Icons.check_circle
+                    : Icons.warning_amber_rounded,
+                color: status.allRequiredGranted
+                    ? const Color(0xFF10B981)
+                    : const Color(0xFFB45309),
+                size: 28,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      status.allRequiredGranted
+                          ? '모든 권한 설정 완료'
+                          : '권한 설정이 필요합니다',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: status.allRequiredGranted
+                            ? const Color(0xFF047857)
+                            : const Color(0xFFB45309),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      status.allRequiredGranted
+                          ? '안전 확인 알림이 정상 작동합니다'
+                          : '${status.missing.length}개의 권한이 필요합니다',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: status.allRequiredGranted
+                            ? const Color(0xFF047857)
+                            : const Color(0xFFB45309),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Individual permission status
+        ...status.permissions.map((permission) => _buildPermissionStatusItem(permission)),
+        
+        // Action button for missing permissions
+        if (status.missing.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => _showPermissionGuide(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFB45309),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                '권한 설정하기',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPermissionStatusItem(PermissionInfo permission) {
+    IconData icon;
+    Color iconColor;
+    
+    switch (permission.type) {
+      case PermissionType.location:
+        icon = Icons.my_location_rounded;
+        iconColor = const Color(0xFFFF7043);
+        break;
+      case PermissionType.batteryOptimization:
+        icon = Icons.battery_std;
+        iconColor = const Color(0xFF10B981);
+        break;
+      case PermissionType.usageStats:
+        icon = Icons.security;
+        iconColor = const Color(0xFF3B82F6);
+        break;
+      case PermissionType.overlay:
+        icon = Icons.layers_rounded;
+        iconColor = const Color(0xFF8B5CF6);
+        break;
+      case PermissionType.notifications:
+        icon = Icons.notifications_active;
+        iconColor = const Color(0xFFF59E0B);
+        break;
+      default:
+        icon = Icons.settings;
+        iconColor = const Color(0xFF6B7280);
+    }
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FA),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: permission.isGranted
+              ? const Color(0xFFD1FAE5)
+              : const Color(0xFFFED7D7),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  permission.displayName,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF374151),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  permission.description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: permission.isGranted
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFEF4444),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              permission.isGranted ? '허용됨' : '필요함',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          if (!permission.isGranted)
+            IconButton(
+              icon: const Icon(Icons.arrow_forward_ios, size: 16),
+              onPressed: () => _requestSinglePermission(permission),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showPermissionGuide() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          constraints: const BoxConstraints(maxHeight: 600),
+          child: SingleChildScrollView(
+            child: PermissionGuideWidget(
+              showDismissButton: true,
+              compactMode: false,
+              onAllPermissionsGranted: () {
+                Navigator.of(context).pop();
+                _loadSettings(); // Refresh settings
+                _showMessage('모든 권한이 설정되었습니다!');
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _requestSinglePermission(PermissionInfo permission) async {
+    final granted = await PermissionManagerService.requestPermission(permission.type);
+    
+    if (granted) {
+      _showMessage('권한이 허용되었습니다');
+    } else {
+      _showMessage('권한 설정을 완료해주세요');
+      // Open system settings as fallback
+      await PermissionManagerService.openPermissionSettings(permission.type);
+    }
+    
+    // Refresh settings
+    await Future.delayed(const Duration(milliseconds: 500));
+    await _loadSettings();
   }
 }

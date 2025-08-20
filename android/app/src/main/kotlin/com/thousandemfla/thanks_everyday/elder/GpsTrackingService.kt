@@ -24,8 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class GpsTrackingService : Service() {
     companion object {
         private const val TAG = "GpsTrackingService"
-        private const val NOTIFICATION_ID = 2001
-        private const val CHANNEL_ID = "gps_tracking_channel"
+        private const val NOTIFICATION_ID = 1001 // Shared with ScreenMonitorService
+        private const val CHANNEL_ID = "health_monitoring_channel" // Shared channel
         private const val UPDATE_INTERVAL_MS = 2 * 60 * 1000L // 2 minutes
         
         private val isServiceRunning = AtomicBoolean(false)
@@ -114,10 +114,10 @@ class GpsTrackingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "GPS 위치 추적",
+                "건강 안전 서비스",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "가족에게 위치 정보를 전송하는 중입니다"
+                description = "가족과 함께하는 안전한 일상을 위한 서비스입니다"
                 setSound(null, null)
                 enableVibration(false)
             }
@@ -126,9 +126,20 @@ class GpsTrackingService : Service() {
     }
     
     private fun createNotification(): Notification {
+        // Check if screen monitoring is also active to create combined notification
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+        
+        val title = "가족과 함께하는 안전한 일상"
+        val text = if (survivalEnabled) {
+            "위치 공유와 안전 확인 서비스가 활성화되어 있습니다"
+        } else {
+            "위치 공유 서비스가 활성화되어 있습니다"
+        }
+        
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("GPS 위치 추적 활성")
-            .setContentText("2분마다 가족에게 위치를 전송하는 중입니다")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
@@ -276,18 +287,18 @@ class GpsTrackingService : Service() {
             }
             
             val db = FirebaseFirestore.getInstance()
-            val locationData = mapOf(
-                "latitude" to location.latitude,
-                "longitude" to location.longitude,
-                "accuracy" to location.accuracy.toDouble(),
-                "provider" to (location.provider ?: "unknown"),
-                "timestamp" to com.google.firebase.Timestamp.now(),
-                "battery_level" to getBatteryLevel()
+            // Update main document location field (optimized schema - clean data only)
+            val locationUpdate = mapOf(
+                "location" to mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude,
+                    "timestamp" to com.google.firebase.Timestamp.now(),
+                    "address" to "" // Address can be added later if needed
+                )
             )
             
             db.collection("families").document(familyId)
-                .collection("locations")
-                .add(locationData)
+                .update(locationUpdate)
                 .addOnSuccessListener {
                     Log.d(TAG, "✅ Location uploaded to Firebase successfully")
                     updateNotification("최근 업데이트: ${java.text.SimpleDateFormat("HH:mm").format(java.util.Date())}")
@@ -303,9 +314,19 @@ class GpsTrackingService : Service() {
     
     private fun updateNotification(text: String) {
         try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+            
+            val title = "가족과 함께하는 안전한 일상"
+            val mainText = if (survivalEnabled) {
+                "위치 공유와 안전 확인 서비스가 활성화되어 있습니다"
+            } else {
+                "위치 공유 서비스가 활성화되어 있습니다"
+            }
+            
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("GPS 위치 추적 활성")
-                .setContentText(text)
+                .setContentTitle(title)
+                .setContentText(mainText)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)

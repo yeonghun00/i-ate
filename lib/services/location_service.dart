@@ -5,14 +5,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class LocationService {
   static const String _locationEnabledKey = 'flutter.location_tracking_enabled';
-  static const String _lastLocationKey = 'last_location';
+  // _lastLocationKey removed - not currently used
   static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
   
   static final FirebaseService _firebaseService = FirebaseService();
-  static Timer? _locationTimer;
+  // _locationTimer removed - location updates now handled via native code
   static Position? _lastKnownPosition;
   
   // Initialize location service
@@ -26,14 +27,14 @@ class LocationService {
             break;
         }
       } catch (e) {
-        print('Error handling location method call: $e');
+        AppLogger.error('Error handling location method call: $e', tag: 'LocationService');
       }
     });
     
     if (await isLocationTrackingEnabled()) {
       await _startNativeLocationTracking();
     }
-    print('Location service initialized');
+    AppLogger.info('Location service initialized', tag: 'LocationService');
   }
   
   // Check if location tracking is enabled
@@ -60,9 +61,9 @@ class LocationService {
   static Future<void> _resetLocationThrottle() async {
     try {
       await _channel.invokeMethod('resetThrottleTimer');
-      print('✅ Location throttle reset - next update will be immediate');
+      AppLogger.info('Location throttle reset - next update will be immediate', tag: 'LocationService');
     } catch (e) {
-      print('❌ Failed to reset location throttle: $e');
+      AppLogger.error('Failed to reset location throttle: $e', tag: 'LocationService');
     }
   }
   
@@ -70,7 +71,7 @@ class LocationService {
   static Future<bool> checkLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      print('Location service is disabled');
+      AppLogger.info('Location service is disabled', tag: 'LocationService');
       return false;
     }
     
@@ -78,20 +79,20 @@ class LocationService {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        print('Location permission denied');
+        AppLogger.warning('Location permission denied', tag: 'LocationService');
         return false;
       }
     }
     
     if (permission == LocationPermission.deniedForever) {
-      print('Location permission denied forever');
+      AppLogger.warning('Location permission denied forever', tag: 'LocationService');
       return false;
     }
     
     // For background location tracking, we need "always" permission
     if (permission == LocationPermission.whileInUse) {
-      print('⚠️ Location permission granted but only for "while in use" - background tracking may be limited');
-      print('💡 For continuous background tracking, "Always allow" permission is recommended');
+      AppLogger.warning('Location permission granted but only for "while in use" - background tracking may be limited', tag: 'LocationService');
+      AppLogger.info('For continuous background tracking, "Always allow" permission is recommended', tag: 'LocationService');
     }
     
     return true;
@@ -108,17 +109,17 @@ class LocationService {
     // Check for "Always allow" location permission
     final hasAlwaysPermission = await hasBackgroundLocationPermission();
     if (!hasAlwaysPermission) {
-      print('⚠️ Background location permission not granted - tracking may stop when app is closed');
-      print('💡 Please enable "Always allow" location permission for continuous background tracking');
+      AppLogger.warning('Background location permission not granted - tracking may stop when app is closed', tag: 'LocationService');
+      AppLogger.info('Please enable "Always allow" location permission for continuous background tracking', tag: 'LocationService');
     }
     
     // Check battery optimization (recommended for better background tracking)
     final ignoreBatteryOptimizations = await Permission.ignoreBatteryOptimizations.status;
     if (!ignoreBatteryOptimizations.isGranted) {
-      print('Battery optimization permission not granted');
+      AppLogger.warning('Battery optimization permission not granted', tag: 'LocationService');
       final result = await Permission.ignoreBatteryOptimizations.request();
       if (!result.isGranted) {
-        print('Battery optimization permission denied - location tracking may be limited');
+        AppLogger.warning('Battery optimization permission denied - location tracking may be limited', tag: 'LocationService');
         return false;
       }
     }
@@ -143,7 +144,7 @@ class LocationService {
       
       return position;
     } catch (e) {
-      print('Failed to get current location: $e');
+      AppLogger.error('Failed to get current location: $e', tag: 'LocationService');
       return null;
     }
   }
@@ -151,15 +152,15 @@ class LocationService {
   // Start native location tracking (survives app kills)
   static Future<void> _startNativeLocationTracking() async {
     if (!await checkLocationPermission()) {
-      print('Location permission not granted');
+      AppLogger.warning('Location permission not granted', tag: 'LocationService');
       return;
     }
     
     try {
       await _channel.invokeMethod('startLocationTracking');
-      print('✅ Native location tracking started - survives app kills');
+      AppLogger.info('Native location tracking started - survives app kills', tag: 'LocationService');
     } on PlatformException catch (e) {
-      print('❌ Failed to start native location tracking: ${e.message}');
+      AppLogger.error('Failed to start native location tracking: ${e.message}', tag: 'LocationService');
     }
   }
   
@@ -167,9 +168,9 @@ class LocationService {
   static Future<void> _stopNativeLocationTracking() async {
     try {
       await _channel.invokeMethod('stopLocationMonitoring');
-      print('✅ Native location tracking stopped');
+      AppLogger.info('Native location tracking stopped', tag: 'LocationService');
     } on PlatformException catch (e) {
-      print('❌ Failed to stop native location tracking: ${e.message}');
+      AppLogger.error('Failed to stop native location tracking: ${e.message}', tag: 'LocationService');
     }
   }
   
@@ -182,9 +183,9 @@ class LocationService {
         address: '', // Could be enhanced with geocoding in the future
       );
       
-      print('Location updated in Firebase: ${position.latitude}, ${position.longitude}');
+      AppLogger.info('Location updated in Firebase: ${position.latitude}, ${position.longitude}', tag: 'LocationService');
     } catch (e) {
-      print('Failed to update location in Firebase: $e');
+      AppLogger.error('Failed to update location in Firebase: $e', tag: 'LocationService');
     }
   }
   
@@ -201,7 +202,7 @@ class LocationService {
       final timestamp = args['timestamp'] as int;
       final accuracy = args['accuracy'] as double;
       
-      print('📍 Native location update: $latitude, $longitude (accuracy: ${accuracy}m)');
+      AppLogger.debug('Native location update: $latitude, $longitude (accuracy: ${accuracy}m)', tag: 'LocationService');
       
       // Create Position object
       _lastKnownPosition = Position(
@@ -221,7 +222,7 @@ class LocationService {
       await _updateLocationInFirebase(_lastKnownPosition!);
       
     } catch (e) {
-      print('❌ Failed to handle native location update: $e');
+      AppLogger.error('Failed to handle native location update: $e', tag: 'LocationService');
     }
   }
   
@@ -257,28 +258,28 @@ class LocationService {
   
   /// Test location service debugging
   static Future<void> testLocationUpdate() async {
-    print('📍 📍 TESTING LOCATION SERVICE 📍 📍');
+    AppLogger.debug('TESTING LOCATION SERVICE', tag: 'LocationService');
     
     try {
       // Check if location is enabled
       final isEnabled = await isLocationTrackingEnabled();
-      print('Location tracking enabled: $isEnabled');
+      AppLogger.debug('Location tracking enabled: $isEnabled', tag: 'LocationService');
       
       // Check permissions
       final hasPermission = await checkLocationPermission();
-      print('Has location permission: $hasPermission');
+      AppLogger.debug('Has location permission: $hasPermission', tag: 'LocationService');
       
       // Try to get current location manually
-      print('Attempting to get current location...');
+      AppLogger.debug('Attempting to get current location...', tag: 'LocationService');
       final position = await getCurrentLocation();
       if (position != null) {
-        print('✅ Got location: ${position.latitude}, ${position.longitude}');
+        AppLogger.debug('Got location: ${position.latitude}, ${position.longitude}', tag: 'LocationService');
       } else {
-        print('❌ Failed to get location');
+        AppLogger.error('Failed to get location', tag: 'LocationService');
       }
       
     } catch (e) {
-      print('❌ Location test failed: $e');
+      AppLogger.error('Location test failed: $e', tag: 'LocationService');
     }
   }
 }

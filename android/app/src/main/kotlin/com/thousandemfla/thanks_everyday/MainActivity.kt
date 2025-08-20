@@ -298,6 +298,49 @@ class MainActivity : FlutterActivity() {
                     val success = requestAutoStartPermission()
                     result.success(success)
                 }
+                "checkBootReceiverStatus" -> {
+                    // Return boot receiver status
+                    val status = AlternativeBootDetector.getAlternativeDetectionStatus(this)
+                    result.success(status["bootReceiverWorking"] ?: "unknown")
+                }
+                "checkForMissedBoot" -> {
+                    val missed = AlternativeBootDetector.checkForMissedBoot(this)
+                    result.success(missed)
+                }
+                "openMiuiAutoStartSettings" -> {
+                    val success = MiuiPermissionHelper.openAutoStartSettings(this)
+                    result.success(success)
+                }
+                "openBatteryOptimizationSettings" -> {
+                    try {
+                        openMIUIBatterySettings()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error opening battery settings: ${e.message}")
+                        result.success(false)
+                    }
+                }
+                "shouldShowMiuiGuidance" -> {
+                    val shouldShow = if (MiuiPermissionHelper.isMiuiDevice()) {
+                        val guidanceInfo = MiuiPermissionHelper.getMiuiGuidanceInfo(this)
+                        guidanceInfo.needsAutoStartPermission
+                    } else {
+                        false
+                    }
+                    result.success(shouldShow)
+                }
+                "markMiuiGuidanceShown" -> {
+                    MiuiPermissionHelper.markUserGuided(this)
+                    result.success(true)
+                }
+                "startAlternativeBootDetection" -> {
+                    AlternativeBootDetector.startAlternativeDetection(this)
+                    result.success(true)
+                }
+                "restoreServicesAfterBoot" -> {
+                    manualResumeMonitoring()
+                    result.success(true)
+                }
                 else -> {
                     result.notImplemented()
                 }

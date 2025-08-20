@@ -31,36 +31,42 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Families collection - allow access for family creators and members
+    // Families collection - SECURE access control
     match /families/{familyId} {
       // Allow any authenticated user to read for connection code checking and family access
       allow read: if request.auth != null;
+      // Only allow write if user has access to this specific family
       allow write: if hasAccessToFamily(familyId);
 
-      // Meals subcollection - explicit rules for better debugging
+      // Meals subcollection - restricted to family members only
       match /meals/{mealId} {
         allow read, write: if hasAccessToFamily(familyId);
       }
 
-      // Recordings subcollection
+      // Recordings subcollection - restricted to family members only
       match /recordings/{recordingId} {
         allow read, write: if hasAccessToFamily(familyId);
       }
 
-      // Child devices subcollection
+      // Location data subcollection - restricted to family members only
+      match /locations/{locationId} {
+        allow read, write: if hasAccessToFamily(familyId);
+      }
+
+      // Child devices subcollection - restricted to family members only
       match /child_devices/{deviceId} {
         allow read, write: if hasAccessToFamily(familyId);
       }
+      
+      // Allow family owners to query child_devices subcollection (even when empty)
+      match /child_devices {
+        allow read: if hasAccessToFamily(familyId);
+      }
 
-      // Any other subcollections
+      // Any other subcollections - restricted to family members only
       match /{subcollection=**} {
         allow read, write: if hasAccessToFamily(familyId);
       }
-    }
-
-    // FCM tokens collection for notifications
-    match /fcmTokens/{tokenId} {
-      allow read, write: if request.auth != null;
     }
 
     // Test collection for connectivity testing
@@ -68,15 +74,20 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
-    // Subscriptions collection
+    // FCM tokens collection for notifications
+    match /fcmTokens/{tokenId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Subscriptions collection - users can only access their own subscription
     match /subscriptions/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // App analytics and logs
+    // App analytics and logs - write-only for users
     match /analytics/{document=**} {
       allow write: if request.auth != null;
-      allow read: if false;
+      allow read: if false; // Only admin tools can read
     }
 
     // Global app settings (read-only for users)

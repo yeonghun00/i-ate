@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/services/smart_usage_detector.dart';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class ScreenMonitorService {
   static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
@@ -21,12 +22,12 @@ class ScreenMonitorService {
               break;
           }
         } catch (e) {
-          print('Error handling method call: $e');
+          AppLogger.error('Error handling method call: $e', tag: 'ScreenMonitorService');
         }
       });
-      print('ScreenMonitorService method channel initialized');
+      AppLogger.info('ScreenMonitorService method channel initialized', tag: 'ScreenMonitorService');
     } catch (e) {
-      print('ScreenMonitorService initialization error: $e');
+      AppLogger.error('ScreenMonitorService initialization error: $e', tag: 'ScreenMonitorService');
     }
   }
   
@@ -46,10 +47,10 @@ class ScreenMonitorService {
       // Start smart usage detection for enhanced monitoring
       await SmartUsageDetector.instance.initialize();
       
-      print('Screen monitoring started (Legacy + Smart Detection)');
+      AppLogger.info('Screen monitoring started (Legacy + Smart Detection)', tag: 'ScreenMonitorService');
       return true;
     } on PlatformException catch (e) {
-      print('Failed to start screen monitoring: ${e.message}');
+      AppLogger.error('Failed to start screen monitoring: ${e.message}', tag: 'ScreenMonitorService');
       return false;
     }
   }
@@ -62,10 +63,10 @@ class ScreenMonitorService {
       // Stop smart usage detection as well
       await SmartUsageDetector.instance.stop();
       
-      print('Screen monitoring stopped (Legacy + Smart Detection)');
+      AppLogger.info('Screen monitoring stopped (Legacy + Smart Detection)', tag: 'ScreenMonitorService');
       return true;
     } on PlatformException catch (e) {
-      print('Failed to stop screen monitoring: ${e.message}');
+      AppLogger.error('Failed to stop screen monitoring: ${e.message}', tag: 'ScreenMonitorService');
       return false;
     }
   }
@@ -76,7 +77,7 @@ class ScreenMonitorService {
       final result = await _channel.invokeMethod('checkPermissions');
       return result == true;
     } on PlatformException catch (e) {
-      print('Failed to check permissions: ${e.message}');
+      AppLogger.error('Failed to check permissions: ${e.message}', tag: 'ScreenMonitorService');
       return false;
     }
   }
@@ -87,7 +88,7 @@ class ScreenMonitorService {
       final result = await _channel.invokeMethod('checkUsageStatsPermission');
       return result == true;
     } on PlatformException catch (e) {
-      print('Failed to check usage stats permission: ${e.message}');
+      AppLogger.error('Failed to check usage stats permission: ${e.message}', tag: 'ScreenMonitorService');
       return false;
     }
   }
@@ -98,7 +99,7 @@ class ScreenMonitorService {
       final result = await _channel.invokeMethod('checkBatteryOptimization');
       return result == true;
     } on PlatformException catch (e) {
-      print('Failed to check battery optimization: ${e.message}');
+      AppLogger.error('Failed to check battery optimization: ${e.message}', tag: 'ScreenMonitorService');
       return false;
     }
   }
@@ -108,7 +109,7 @@ class ScreenMonitorService {
     try {
       await _channel.invokeMethod('requestUsageStatsPermission');
     } on PlatformException catch (e) {
-      print('Failed to request usage stats permission: ${e.message}');
+      AppLogger.error('Failed to request usage stats permission: ${e.message}', tag: 'ScreenMonitorService');
     }
   }
 
@@ -117,7 +118,7 @@ class ScreenMonitorService {
     try {
       await _channel.invokeMethod('requestBatteryOptimizationDisable');
     } on PlatformException catch (e) {
-      print('Failed to request battery optimization disable: ${e.message}');
+      AppLogger.error('Failed to request battery optimization disable: ${e.message}', tag: 'ScreenMonitorService');
     }
   }
   
@@ -126,7 +127,7 @@ class ScreenMonitorService {
     try {
       await _channel.invokeMethod('requestPermissions');
     } on PlatformException catch (e) {
-      print('Failed to request permissions: ${e.message}');
+      AppLogger.error('Failed to request permissions: ${e.message}', tag: 'ScreenMonitorService');
     }
   }
   
@@ -136,7 +137,7 @@ class ScreenMonitorService {
       final result = await _channel.invokeMethod('getScreenOnCount');
       return result ?? 0;
     } on PlatformException catch (e) {
-      print('Failed to get screen on count: ${e.message}');
+      AppLogger.error('Failed to get screen on count: ${e.message}', tag: 'ScreenMonitorService');
       return 0;
     }
   }
@@ -150,7 +151,7 @@ class ScreenMonitorService {
       }
       return null;
     } on PlatformException catch (e) {
-      print('Failed to get last screen activity: ${e.message}');
+      AppLogger.error('Failed to get last screen activity: ${e.message}', tag: 'ScreenMonitorService');
       return null;
     }
   }
@@ -185,12 +186,12 @@ class ScreenMonitorService {
   static Future<void> enableSurvivalSignal() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('flutter.survival_signal_enabled', true);
-    print('Survival signal enabled in preferences');
+    AppLogger.info('Survival signal enabled in preferences', tag: 'ScreenMonitorService');
     
     // Check permissions before starting service
     final hasPermissions = await checkPermissions();
     if (!hasPermissions) {
-      print('Cannot start survival signal - permissions not granted');
+      AppLogger.warning('Cannot start survival signal - permissions not granted', tag: 'ScreenMonitorService');
       return;
     }
     
@@ -199,12 +200,12 @@ class ScreenMonitorService {
     // Start monitoring
     final started = await startMonitoring();
     if (started) {
-      print('Native screen monitoring enabled successfully');
-      print('- Background service: Started');
-      print('- WorkManager: Scheduled for periodic checks');
-      print('- Screen on/off events: Being monitored');
+      AppLogger.info('Native screen monitoring enabled successfully', tag: 'ScreenMonitorService');
+      AppLogger.info('- Background service: Started', tag: 'ScreenMonitorService');
+      AppLogger.info('- WorkManager: Scheduled for periodic checks', tag: 'ScreenMonitorService');
+      AppLogger.info('- Screen on/off events: Being monitored', tag: 'ScreenMonitorService');
     } else {
-      print('Failed to start screen monitoring');
+      AppLogger.error('Failed to start screen monitoring', tag: 'ScreenMonitorService');
     }
   }
   
@@ -215,18 +216,18 @@ class ScreenMonitorService {
     
     // Stop monitoring
     await stopMonitoring();
-    print('Native screen monitoring disabled');
+    AppLogger.info('Native screen monitoring disabled', tag: 'ScreenMonitorService');
   }
   
   /// Handle inactivity alert from native service
   static Future<void> _handleInactivityAlert() async {
-    print('Handling inactivity alert');
+    AppLogger.info('Handling inactivity alert', tag: 'ScreenMonitorService');
     
     try {
       // Send alert to Firebase for family notification
       await _sendSurvivalAlert();
     } catch (e) {
-      print('Failed to send survival alert: $e');
+      AppLogger.error('Failed to send survival alert: $e', tag: 'ScreenMonitorService');
     }
   }
   
@@ -236,7 +237,7 @@ class ScreenMonitorService {
       // Update Firebase with general phone activity
       await _firebaseService.updatePhoneActivity();
     } catch (e) {
-      print('Failed to update Firebase phone activity: $e');
+      AppLogger.error('Failed to update Firebase phone activity: $e', tag: 'ScreenMonitorService');
     }
   }
   
@@ -247,7 +248,7 @@ class ScreenMonitorService {
     final elderlyName = prefs.getString('elderly_name');
     
     if (familyId == null) {
-      print('No family ID found for survival alert');
+      AppLogger.warning('No family ID found for survival alert', tag: 'ScreenMonitorService');
       return;
     }
     
@@ -258,9 +259,9 @@ class ScreenMonitorService {
         message: '12시간 이상 휴대폰 사용이 없습니다. 안부를 확인해주세요.',
       );
       
-      print('Survival alert sent to family');
+      AppLogger.info('Survival alert sent to family', tag: 'ScreenMonitorService');
     } catch (e) {
-      print('Failed to send survival alert to Firebase: $e');
+      AppLogger.error('Failed to send survival alert to Firebase: $e', tag: 'ScreenMonitorService');
     }
   }
   
@@ -270,7 +271,7 @@ class ScreenMonitorService {
       final result = await _channel.invokeMethod('checkAutoStartPermission');
       return Map<String, dynamic>.from(result);
     } on PlatformException catch (e) {
-      print('Failed to check auto-start permission: ${e.message}');
+      AppLogger.error('Failed to check auto-start permission: ${e.message}', tag: 'ScreenMonitorService');
       return null;
     }
   }
@@ -280,7 +281,7 @@ class ScreenMonitorService {
     try {
       await _channel.invokeMethod('openAutoStartSettings');
     } on PlatformException catch (e) {
-      print('Failed to open auto-start settings: ${e.message}');
+      AppLogger.error('Failed to open auto-start settings: ${e.message}', tag: 'ScreenMonitorService');
     }
   }
   

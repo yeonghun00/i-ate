@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 /// MIUI Boot Helper - Flutter integration for MIUI boot detection and user guidance
 /// 
@@ -9,7 +10,7 @@ import 'dart:io';
 /// elder safety monitoring from resuming after device reboot.
 class MiuiBootHelper {
   static const String _tag = 'MiuiBootHelper';
-  static const MethodChannel _channel = MethodChannel('elder_monitoring');
+  static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/miui');
   
   /// Check if device is MIUI and needs special handling
   static Future<bool> isMiuiDevice() async {
@@ -17,7 +18,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('isMiuiDevice');
       return result == true;
     } catch (e) {
-      print('$_tag Error checking MIUI device: $e');
+      AppLogger.error('Error checking MIUI device: $e', tag: _tag);
       // Fallback: check manufacturer
       return Platform.isAndroid && 
         (Platform.operatingSystemVersion.toLowerCase().contains('xiaomi') ||
@@ -31,7 +32,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('checkBootReceiverStatus');
       return BootReceiverStatus.fromString(result ?? 'unknown');
     } catch (e) {
-      print('$_tag Error checking boot receiver status: $e');
+      AppLogger.error('Error checking boot receiver status: $e', tag: _tag);
       return BootReceiverStatus.unknown;
     }
   }
@@ -42,7 +43,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('checkForMissedBoot');
       return result == true;
     } catch (e) {
-      print('$_tag Error checking for missed boot: $e');
+      AppLogger.error('Error checking for missed boot: $e', tag: _tag);
       return false;
     }
   }
@@ -53,7 +54,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('openMiuiAutoStartSettings');
       return result == true;
     } catch (e) {
-      print('$_tag Error opening MIUI settings: $e');
+      AppLogger.error('Error opening MIUI settings: $e', tag: _tag);
       return false;
     }
   }
@@ -64,7 +65,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('openBatteryOptimizationSettings');
       return result == true;
     } catch (e) {
-      print('$_tag Error opening battery settings: $e');
+      AppLogger.error('Error opening battery settings: $e', tag: _tag);
       return false;
     }
   }
@@ -77,7 +78,7 @@ class MiuiBootHelper {
       final result = await _channel.invokeMethod('shouldShowMiuiGuidance');
       return result == true;
     } catch (e) {
-      print('$_tag Error checking guidance requirement: $e');
+      AppLogger.error('Error checking guidance requirement: $e', tag: _tag);
       
       // Fallback: check SharedPreferences
       final prefs = await SharedPreferences.getInstance();
@@ -99,7 +100,7 @@ class MiuiBootHelper {
       await prefs.setInt('miui_guidance_shown_time', DateTime.now().millisecondsSinceEpoch);
       
     } catch (e) {
-      print('$_tag Error marking guidance shown: $e');
+      AppLogger.error('Error marking guidance shown: $e', tag: _tag);
     }
   }
   
@@ -109,7 +110,7 @@ class MiuiBootHelper {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getBool('needs_post_boot_activation') ?? false;
     } catch (e) {
-      print('$_tag Error checking post-boot activation: $e');
+      AppLogger.error('Error checking post-boot activation: $e', tag: _tag);
       return false;
     }
   }
@@ -120,7 +121,7 @@ class MiuiBootHelper {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('needs_post_boot_activation');
     } catch (e) {
-      print('$_tag Error clearing post-boot flag: $e');
+      AppLogger.error('Error clearing post-boot flag: $e', tag: _tag);
     }
   }
   
@@ -150,20 +151,20 @@ class MiuiBootHelper {
   /// Initialize MIUI boot detection on app start
   static Future<void> initializeOnAppStart() async {
     try {
-      print('$_tag Initializing MIUI boot detection...');
+      AppLogger.info('Initializing MIUI boot detection...', tag: _tag);
       
       // Check for missed boot
       final missedBoot = await checkForMissedBoot();
       if (missedBoot) {
-        print('$_tag ⚠️ Missed boot detected - services restored automatically');
+        AppLogger.warning('Missed boot detected - services restored automatically', tag: _tag);
       }
       
       // Start alternative boot detection systems
       await _channel.invokeMethod('startAlternativeBootDetection');
-      print('$_tag ✅ Alternative boot detection initialized');
+      AppLogger.info('Alternative boot detection initialized', tag: _tag);
       
     } catch (e) {
-      print('$_tag Error initializing: $e');
+      AppLogger.error('Error initializing: $e', tag: _tag);
     }
   }
 }
@@ -309,9 +310,9 @@ class PostBootActivationDialog extends StatelessWidget {
             
             // Trigger service restoration
             try {
-              const MethodChannel('elder_monitoring').invokeMethod('restoreServicesAfterBoot');
+              const MethodChannel('com.thousandemfla.thanks_everyday/miui').invokeMethod('restoreServicesAfterBoot');
             } catch (e) {
-              print('Error restoring services: $e');
+              AppLogger.error('Error restoring services: $e', tag: 'PostBootActivationDialog');
             }
           },
           style: ElevatedButton.styleFrom(backgroundColor: Colors.green),

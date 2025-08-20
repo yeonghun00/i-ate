@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
+import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class FCMv1Service {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -48,12 +49,12 @@ class FCMv1Service {
       );
 
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        print('FCM permissions granted');
+        AppLogger.info('FCM permissions granted', tag: 'FCMv1Service');
       } else {
-        print('FCM permissions denied');
+        AppLogger.warning('FCM permissions denied', tag: 'FCMv1Service');
       }
     } catch (e) {
-      print('FCM initialization failed: $e');
+      AppLogger.error('FCM initialization failed: $e', tag: 'FCMv1Service');
     }
   }
 
@@ -78,7 +79,7 @@ class FCMv1Service {
         client.close();
       }
     } catch (e) {
-      print('Failed to get access token: $e');
+      AppLogger.error('Failed to get access token: $e', tag: 'FCMv1Service');
       return null;
     }
   }
@@ -95,7 +96,7 @@ class FCMv1Service {
       final childTokens = await _getChildAppTokens(familyId);
 
       if (childTokens.isEmpty) {
-        print('No child app tokens found for family: $familyId');
+        AppLogger.warning('No child app tokens found for family: $familyId', tag: 'FCMv1Service');
         return false;
       }
 
@@ -125,7 +126,7 @@ class FCMv1Service {
 
       return allSent;
     } catch (e) {
-      print('Failed to send meal notification: $e');
+      AppLogger.error('Failed to send meal notification: $e', tag: 'FCMv1Service');
       return false;
     }
   }
@@ -140,7 +141,7 @@ class FCMv1Service {
       final childTokens = await _getChildAppTokens(familyId);
 
       if (childTokens.isEmpty) {
-        print('No child app tokens found for family: $familyId');
+        AppLogger.warning('No child app tokens found for family: $familyId', tag: 'FCMv1Service');
         return false;
       }
 
@@ -166,7 +167,7 @@ class FCMv1Service {
 
       return allSent;
     } catch (e) {
-      print('Failed to send survival alert: $e');
+      AppLogger.error('Failed to send survival alert: $e', tag: 'FCMv1Service');
       return false;
     }
   }
@@ -181,7 +182,7 @@ class FCMv1Service {
       final childTokens = await _getChildAppTokens(familyId);
 
       if (childTokens.isEmpty) {
-        print('No child app tokens found for family: $familyId');
+        AppLogger.warning('No child app tokens found for family: $familyId', tag: 'FCMv1Service');
         return false;
       }
 
@@ -206,7 +207,7 @@ class FCMv1Service {
 
       return allSent;
     } catch (e) {
-      print('Failed to send food alert: $e');
+      AppLogger.error('Failed to send food alert: $e', tag: 'FCMv1Service');
       return false;
     }
   }
@@ -223,7 +224,7 @@ class FCMv1Service {
     try {
       final accessToken = await _getAccessToken();
       if (accessToken == null) {
-        print('Failed to get access token');
+        AppLogger.error('Failed to get access token', tag: 'FCMv1Service');
         return false;
       }
 
@@ -268,14 +269,14 @@ class FCMv1Service {
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
-        print('FCM v1 notification sent successfully: ${responseData['name']}');
+        AppLogger.info('FCM v1 notification sent successfully: ${responseData['name']}', tag: 'FCMv1Service');
         return true;
       } else {
-        print('FCM v1 error: ${response.statusCode} - ${response.body}');
+        AppLogger.error('FCM v1 error: ${response.statusCode} - ${response.body}', tag: 'FCMv1Service');
         return false;
       }
     } catch (e) {
-      print('Failed to send FCM v1 notification: $e');
+      AppLogger.error('Failed to send FCM v1 notification: $e', tag: 'FCMv1Service');
       return false;
     }
   }
@@ -283,6 +284,8 @@ class FCMv1Service {
   /// Get all child app FCM tokens for a family
   static Future<List<String>> _getChildAppTokens(String familyId) async {
     try {
+      AppLogger.info('🔍 Checking for child devices in family: $familyId', tag: 'FCMv1Service');
+      
       final snapshot = await _firestore
           .collection('families')
           .doc(familyId)
@@ -291,12 +294,37 @@ class FCMv1Service {
           .where('is_active', isEqualTo: true)
           .get();
 
+      AppLogger.info('📊 Found ${snapshot.docs.length} child device documents', tag: 'FCMv1Service');
+      
+      if (snapshot.docs.isEmpty) {
+        // Check if there are ANY child devices (even inactive ones)
+        final allDevicesSnapshot = await _firestore
+            .collection('families')
+            .doc(familyId)
+            .collection('child_devices')
+            .get();
+        
+        AppLogger.warning('⚠️ No active child devices found. Total devices in DB: ${allDevicesSnapshot.docs.length}', tag: 'FCMv1Service');
+        
+        // Log what devices exist
+        for (var doc in allDevicesSnapshot.docs) {
+          final data = doc.data();
+          AppLogger.info('📱 Device found: ${doc.id} - active: ${data['is_active']} - has token: ${data['fcm_token'] != null}', tag: 'FCMv1Service');
+        }
+        
+        return [];
+      }
+      
       return snapshot.docs
           .map((doc) => doc.data()['fcm_token'] as String)
           .where((token) => token.isNotEmpty)
           .toList();
     } catch (e) {
-      print('Failed to get child app tokens: $e');
+      if (e.toString().contains('permission-denied')) {
+        AppLogger.warning('No child devices registered for family: $familyId (permission-denied is normal before child app connects)', tag: 'FCMv1Service');
+      } else {
+        AppLogger.error('Failed to get child app tokens: $e', tag: 'FCMv1Service');
+      }
       return [];
     }
   }
@@ -332,10 +360,10 @@ class FCMv1Service {
             'last_updated': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
 
-      print('Child app FCM token registered successfully');
+      AppLogger.info('Child app FCM token registered successfully', tag: 'FCMv1Service');
       return true;
     } catch (e) {
-      print('Failed to register child app FCM token: $e');
+      AppLogger.error('Failed to register child app FCM token: $e', tag: 'FCMv1Service');
       return false;
     }
   }
