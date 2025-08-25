@@ -210,6 +210,13 @@ class FirebaseService {
 
       AppLogger.info('Creating family document with user ID: $currentUserId', tag: 'FirebaseService');
 
+      // Create connection code lookup document for secure family joining
+      await _firestore.collection('connection_codes').doc(connectionCode).set({
+        'familyId': familyId,
+        'elderlyName': elderlyName,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
       // Create family document with unique ID
       await _firestore.collection('families').doc(familyId).set({
         'familyId': familyId,
@@ -282,34 +289,44 @@ class FirebaseService {
   // Verify family code exists (for family members)
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     try {
-      // Ensure _familyId is available - if not, try to restore it from SharedPreferences
-      if (_familyId == null) {
-        AppLogger.info('_familyId is null, attempting to restore from SharedPreferences', tag: 'FirebaseService');
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          _familyId = prefs.getString('family_id');
-          if (_familyId != null) {
-            AppLogger.info('Successfully restored family ID: $_familyId', tag: 'FirebaseService');
-          } else {
-            AppLogger.error('No family ID found in SharedPreferences. Cannot retrieve family info.', tag: 'FirebaseService');
-            return null;
-          }
-        } catch (e) {
-          AppLogger.error('Failed to restore family ID from SharedPreferences: $e', tag: 'FirebaseService');
-          return null;
-        }
+      // FIXED: Use connection code lookup instead of direct family access during setup
+      AppLogger.info('Getting family info using connection code: $connectionCode', tag: 'FirebaseService');
+      
+      // First, resolve family ID from secure connection code lookup
+      final connectionDoc = await _firestore
+          .collection('connection_codes')
+          .doc(connectionCode)
+          .get();
+
+      if (!connectionDoc.exists) {
+        AppLogger.error('No connection code found: $connectionCode', tag: 'FirebaseService');
+        return null;
       }
 
-      // Use stored family ID (secure and user has permission)
-      AppLogger.info('Getting family info using family ID: $_familyId', tag: 'FirebaseService');
-      final doc = await _firestore.collection('families').doc(_familyId!).get();
+      final connectionData = connectionDoc.data()!;
+      final familyId = connectionData['familyId'] as String;
+      
+      // Now get the family document (this will be allowed by rules during setup)
+      final doc = await _firestore.collection('families').doc(familyId).get();
       
       if (doc.exists) {
         final data = doc.data()!;
         data['familyId'] = doc.id; // Add document ID for reference
+        
+        // Update local storage if we don't have family ID
+        if (_familyId == null) {
+          _familyId = familyId;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('family_id', familyId);
+          } catch (e) {
+            AppLogger.warning('Failed to save family ID locally: $e', tag: 'FirebaseService');
+          }
+        }
+        
         return data;
       } else {
-        AppLogger.error('Family document does not exist for ID: $_familyId', tag: 'FirebaseService');
+        AppLogger.error('Family document does not exist for ID: $familyId', tag: 'FirebaseService');
         return null;
       }
     } catch (e) {
@@ -451,14 +468,15 @@ class FirebaseService {
   // CRITICAL: Method for child app to resolve family ID from connection code
   Future<String?> getFamilyIdFromConnectionCode(String connectionCode) async {
     try {
-      final query = await _firestore
-          .collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
+      // Use secure connection code lookup
+      final connectionDoc = await _firestore
+          .collection('connection_codes')
+          .doc(connectionCode)
           .get();
 
-      if (query.docs.isNotEmpty) {
-        return query.docs.first.id; // This is the actual familyId
+      if (connectionDoc.exists) {
+        final data = connectionDoc.data()!;
+        return data['familyId'] as String;
       }
       return null;
     } catch (e) {
@@ -596,67 +614,70 @@ class FirebaseService {
   Stream<bool?> listenForApproval(String connectionCode) async* {
     AppLogger.info('Setting up Firebase listener for connection code: $connectionCode', tag: 'FirebaseService');
 
-    // Ensure _familyId is available - if not, try to restore it from SharedPreferences
-    if (_familyId == null) {
-      AppLogger.info('_familyId is null, attempting to restore from SharedPreferences', tag: 'FirebaseService');
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        _familyId = prefs.getString('family_id');
-        if (_familyId != null) {
-          AppLogger.info('Successfully restored family ID for listening: $_familyId', tag: 'FirebaseService');
-        } else {
-          AppLogger.error('No family ID found in SharedPreferences. Cannot listen for approval.', tag: 'FirebaseService');
-          yield null;
-          return;
-        }
-      } catch (e) {
-        AppLogger.error('Failed to restore family ID from SharedPreferences: $e', tag: 'FirebaseService');
+    // FIXED: Use connection code lookup instead of local family ID
+    try {
+      // First, resolve family ID from secure connection code lookup
+      final connectionDoc = await _firestore
+          .collection('connection_codes')
+          .doc(connectionCode)
+          .get();
+
+      if (!connectionDoc.exists) {
+        AppLogger.error('No connection code found: $connectionCode', tag: 'FirebaseService');
         yield null;
         return;
       }
-    }
 
-    AppLogger.info('Listening for approval on family ID: $_familyId', tag: 'FirebaseService');
+      final connectionData = connectionDoc.data()!;
+      final familyId = connectionData['familyId'] as String;
+      
+      AppLogger.info('Listening for approval on family ID: $familyId', tag: 'FirebaseService');
 
-    // Listen to the family document by ID (user has permission since they created it)
-    await for (final snapshot
-        in _firestore
-            .collection('families')
-            .doc(_familyId!)
-            .snapshots(includeMetadataChanges: true)) {
-      AppLogger.debug('Firebase snapshot received for family ID $_familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}', tag: 'FirebaseService');
+      // Listen to the family document (this will be allowed by rules during setup)
+      await for (final snapshot
+          in _firestore
+              .collection('families')
+              .doc(familyId)
+              .snapshots(includeMetadataChanges: true)) {
+        AppLogger.debug('Firebase snapshot received for family ID $familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}', tag: 'FirebaseService');
 
-      if (snapshot.exists) {
-        final data = snapshot.data();
-        final approved = data?['approved'] as bool?;
-        AppLogger.info('Approval status in Firebase: $approved', tag: 'FirebaseService');
-        yield approved;
-      } else {
-        AppLogger.warning('Family document does not exist', tag: 'FirebaseService');
-        yield null;
+        if (snapshot.exists) {
+          final data = snapshot.data();
+          final approved = data?['approved'] as bool?;
+          AppLogger.info('Approval status in Firebase: $approved', tag: 'FirebaseService');
+          yield approved;
+        } else {
+          AppLogger.warning('Family document does not exist', tag: 'FirebaseService');
+          yield null;
+        }
       }
+    } catch (e) {
+      AppLogger.error('Error in approval listener: $e', tag: 'FirebaseService');
+      yield null;
     }
   }
 
   // Set approval status (for child app)
   Future<bool> setApprovalStatus(String connectionCode, bool approved) async {
     try {
-      // Find family by connection code
-      final query = await _firestore
-          .collection('families')
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
-          .get();
-
-      if (query.docs.isEmpty) {
+      // Get family ID from secure connection code lookup
+      final familyId = await getFamilyIdFromConnectionCode(connectionCode);
+      if (familyId == null) {
         AppLogger.warning('No family found with connection code: $connectionCode', tag: 'FirebaseService');
         return false;
       }
 
-      final familyId = query.docs.first.id;
+      // Add current user as family member when approving
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        AppLogger.error('User not authenticated', tag: 'FirebaseService');
+        return false;
+      }
+
       await _firestore.collection('families').doc(familyId).update({
         'approved': approved,
         'approvedAt': FieldValue.serverTimestamp(),
+        'memberIds': FieldValue.arrayUnion([currentUser.uid]),
       });
       return true;
     } catch (e) {

@@ -21,6 +21,7 @@ class InitialSetupScreen extends StatefulWidget {
 
 class _InitialSetupScreenState extends State<InitialSetupScreen> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _alertHoursController = TextEditingController();
   final FirebaseService _firebaseService = FirebaseService();
 
   bool _isLoading = false;
@@ -28,6 +29,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   // Temporary display variables removed - not used in current implementation
   bool _survivalSignalEnabled = false;
   int _alertHours = 12; // Default 12 hours
+  bool _useCustomAlertHours = false;
   bool _locationTrackingEnabled = false;
   bool _isWaitingForApproval = false;
   int _remainingSeconds = 120; // 2 minutes countdown
@@ -55,24 +57,29 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       );
 
       if (generatedCode != null) {
-        // Update Firebase settings
-        await _firebaseService.updateFamilySettings(
+        // Update Firebase settings with correct alert hours
+        AppLogger.info('Saving alert hours to Firebase: $_alertHours', tag: 'InitialSetupScreen');
+        final settingsUpdated = await _firebaseService.updateFamilySettings(
           survivalSignalEnabled: _survivalSignalEnabled,
           familyContact: '',
           alertHours: _alertHours,
         );
+        
+        if (!settingsUpdated) {
+          AppLogger.error('Failed to save settings to Firebase', tag: 'InitialSetupScreen');
+        }
 
-        // Save settings to SharedPreferences
+        // Save only essential settings to SharedPreferences (Firebase is primary source for alert hours)
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(
           'flutter.survival_signal_enabled',
           _survivalSignalEnabled,
         );
-        await prefs.setInt('alert_hours', _alertHours);
         await prefs.setBool(
           'flutter.location_tracking_enabled',
           _locationTrackingEnabled,
         );
+        // Note: alert_hours is now stored in Firebase only
 
         // Family data is now stored directly in Firebase - no temporary storage needed
 
@@ -822,12 +829,54 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                     Wrap(
                                       spacing: 8,
                                       runSpacing: 8,
-                                      children: [3, 6, 12, 24].map((hours) {
-                                        final isSelected = _alertHours == hours;
-                                        return GestureDetector(
+                                      children: [
+                                        ...[3, 6, 12, 24].map((hours) {
+                                          final isSelected = _alertHours == hours && !_useCustomAlertHours;
+                                          return GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                _alertHours = hours;
+                                                _useCustomAlertHours = false;
+                                                _alertHoursController.clear();
+                                              });
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 8,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isSelected
+                                                    ? const Color(0xFF10B981)
+                                                    : Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
+                                                  color: isSelected
+                                                      ? const Color(0xFF10B981)
+                                                      : const Color(0xFFD1D5DB),
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                '$hours시간',
+                                                style: TextStyle(
+                                                  fontSize: 14.0,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: isSelected
+                                                      ? Colors.white
+                                                      : const Color(0xFF6B7280),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                        // Custom input option
+                                        GestureDetector(
                                           onTap: () {
                                             setState(() {
-                                              _alertHours = hours;
+                                              _useCustomAlertHours = true;
+                                              _alertHoursController.text = _alertHours.toString();
                                             });
                                           },
                                           child: Container(
@@ -836,32 +885,78 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                               vertical: 8,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: isSelected
+                                              color: _useCustomAlertHours
                                                   ? const Color(0xFF10B981)
                                                   : Colors.white,
                                               borderRadius:
                                                   BorderRadius.circular(20),
                                               border: Border.all(
-                                                color: isSelected
+                                                color: _useCustomAlertHours
                                                     ? const Color(0xFF10B981)
                                                     : const Color(0xFFD1D5DB),
                                                 width: 1,
                                               ),
                                             ),
                                             child: Text(
-                                              '$hours시간',
+                                              '직접 입력',
                                               style: TextStyle(
                                                 fontSize: 14.0,
                                                 fontWeight: FontWeight.w500,
-                                                color: isSelected
+                                                color: _useCustomAlertHours
                                                     ? Colors.white
                                                     : const Color(0xFF6B7280),
                                               ),
                                             ),
                                           ),
-                                        );
-                                      }).toList(),
+                                        ),
+                                      ],
                                     ),
+
+                                    if (_useCustomAlertHours) ...[
+                                      const SizedBox(height: 16),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: const Color(0xFF10B981),
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: TextField(
+                                          controller: _alertHoursController,
+                                          keyboardType: TextInputType.number,
+                                          style: const TextStyle(
+                                            fontSize: 16.0,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          decoration: const InputDecoration(
+                                            hintText: '시간 입력 (1-72)',
+                                            hintStyle: TextStyle(
+                                              color: Color(0xFF9CA3AF),
+                                              fontSize: 14.0,
+                                            ),
+                                            suffixText: '시간',
+                                            suffixStyle: TextStyle(
+                                              color: Color(0xFF10B981),
+                                              fontSize: 14.0,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            border: InputBorder.none,
+                                            contentPadding: EdgeInsets.symmetric(vertical: 12),
+                                          ),
+                                          onChanged: (value) {
+                                            final hours = int.tryParse(value);
+                                            if (hours != null && hours >= 1 && hours <= 72) {
+                                              setState(() {
+                                                _alertHours = hours;
+                                              });
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    ],
 
                                     const SizedBox(height: 12),
 
@@ -1065,6 +1160,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     _timeoutTimer?.cancel();
     _countdownTimer?.cancel();
     _nameController.dispose();
+    _alertHoursController.dispose();
     super.dispose();
   }
 }

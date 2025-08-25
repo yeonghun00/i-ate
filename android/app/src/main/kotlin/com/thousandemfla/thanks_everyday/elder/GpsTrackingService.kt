@@ -140,7 +140,7 @@ class GpsTrackingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -327,7 +327,7 @@ class GpsTrackingService : Service() {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(mainText)
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setAutoCancel(false)

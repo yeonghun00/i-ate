@@ -255,7 +255,7 @@ class ScreenMonitorService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("가족과 함께하는 안전한 일상")
                 .setContentText("안전 확인 서비스가 활성화되어 있습니다")
-                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
                 .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for MIUI
                 .setOngoing(true)
                 .setShowWhen(false)
@@ -363,7 +363,7 @@ class ScreenMonitorService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setShowWhen(false)

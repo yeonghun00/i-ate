@@ -26,11 +26,13 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with WidgetsBindingObserver {
   final FirebaseService _firebaseService = FirebaseService();
+  final TextEditingController _alertHoursController = TextEditingController();
   String? _familyCode;
   String? _elderlyName;
   // Recovery code removed - using name + connection code only
   bool _survivalSignalEnabled = false;
   int _alertHours = 12;
+  bool _useCustomAlertHours = false;
   String? _familyContact;
   bool _locationTrackingEnabled = false;
   int _foodAlertHours = 8;
@@ -46,6 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _alertHoursController.dispose();
     super.dispose();
   }
 
@@ -82,13 +85,48 @@ class _SettingsScreenState extends State<SettingsScreen>
       // Check all permissions status
       final permissionStatus = await PermissionManagerService.checkAllPermissions();
 
+      // Get alert hours ONLY from Firebase (primary source)
+      int alertHours = 12; // default fallback
+      if (_firebaseService.familyCode != null) {
+        try {
+          final familyInfo = await _firebaseService.getFamilyInfo(_firebaseService.familyCode!);
+          if (familyInfo != null) {
+            // Check if settings exist in the family info
+            if (familyInfo['settings'] != null) {
+              final settings = familyInfo['settings'] as Map<String, dynamic>;
+              alertHours = settings['alertHours'] ?? 12;
+            } else if (familyInfo['alertHours'] != null) {
+              // Backward compatibility - check direct field
+              alertHours = familyInfo['alertHours'] as int;
+            }
+            AppLogger.info('Loaded alert hours from Firebase: $alertHours', tag: 'SettingsScreen');
+          } else {
+            AppLogger.warning('No family info found in Firebase, using default: 12', tag: 'SettingsScreen');
+          }
+        } catch (e) {
+          AppLogger.error('Failed to fetch alert hours from Firebase: $e', tag: 'SettingsScreen');
+          AppLogger.info('Using default alert hours: 12', tag: 'SettingsScreen');
+        }
+      } else {
+        AppLogger.warning('No family code found, using default alert hours: 12', tag: 'SettingsScreen');
+      }
+
       setState(() {
         _familyCode = _firebaseService.familyCode;
         _elderlyName = _firebaseService.elderlyName;
         // Recovery code loading removed
         _survivalSignalEnabled =
             prefs.getBool('flutter.survival_signal_enabled') ?? false;
-        _alertHours = prefs.getInt('alert_hours') ?? 12;
+        _alertHours = alertHours;
+        
+        // Check if it's a custom value (not in preset options)
+        _useCustomAlertHours = ![3, 6, 12, 24].contains(_alertHours);
+        if (_useCustomAlertHours) {
+          _alertHoursController.text = _alertHours.toString();
+        }
+        
+        AppLogger.info('Settings loaded - Alert hours: $_alertHours, Custom: $_useCustomAlertHours', tag: 'SettingsScreen');
+        
         _familyContact = prefs.getString('family_contact');
         _locationTrackingEnabled = actualLocationEnabled;
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
@@ -178,14 +216,13 @@ class _SettingsScreenState extends State<SettingsScreen>
     AppLogger.info('Updating settings - survivalSignal: $_survivalSignalEnabled, alertHours: $_alertHours', tag: 'SettingsScreen');
 
     try {
-      // Update local settings first
+      // Update local settings (excluding alert_hours which is stored in Firebase only)
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(
         'flutter.survival_signal_enabled',
         _survivalSignalEnabled,
       );
-      await prefs.setInt('alert_hours', _alertHours);
-      AppLogger.info('Local settings updated successfully', tag: 'SettingsScreen');
+      AppLogger.info('Local settings updated successfully (alert hours stored in Firebase only)', tag: 'SettingsScreen');
 
       // Update screen monitoring service
       try {
@@ -631,16 +668,66 @@ class _SettingsScreenState extends State<SettingsScreen>
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: [3, 6, 12, 24].map((hours) {
-              final isSelected = _alertHours == hours;
-              return GestureDetector(
+            children: [
+              ...[3, 6, 12, 24].map((hours) {
+                final isSelected = _alertHours == hours && !_useCustomAlertHours;
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _alertHours = hours;
+                      _useCustomAlertHours = false;
+                      _alertHoursController.clear();
+                    });
+                    // Add slight delay to prevent rapid selection crashes
+                    Future.delayed(const Duration(milliseconds: 300), () {
+                      _updateSettings();
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF10B981) : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFD1D5DB),
+                        width: 2,
+                      ),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF10B981,
+                                ).withValues(alpha: 0.2),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Text(
+                      '$hours시간',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected
+                            ? Colors.white
+                            : const Color(0xFF6B7280),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              // Custom input option
+              GestureDetector(
                 onTap: () {
                   setState(() {
-                    _alertHours = hours;
-                  });
-                  // Add slight delay to prevent rapid selection crashes
-                  Future.delayed(const Duration(milliseconds: 300), () {
-                    _updateSettings();
+                    _useCustomAlertHours = true;
+                    _alertHoursController.text = _alertHours.toString();
                   });
                 },
                 child: Container(
@@ -649,15 +736,15 @@ class _SettingsScreenState extends State<SettingsScreen>
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF10B981) : Colors.white,
+                    color: _useCustomAlertHours ? const Color(0xFF10B981) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isSelected
+                      color: _useCustomAlertHours
                           ? const Color(0xFF10B981)
                           : const Color(0xFFD1D5DB),
                       width: 2,
                     ),
-                    boxShadow: isSelected
+                    boxShadow: _useCustomAlertHours
                         ? [
                             BoxShadow(
                               color: const Color(
@@ -670,19 +757,69 @@ class _SettingsScreenState extends State<SettingsScreen>
                         : [],
                   ),
                   child: Text(
-                    '$hours시간',
+                    '직접 입력',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: isSelected
+                      color: _useCustomAlertHours
                           ? Colors.white
                           : const Color(0xFF6B7280),
                     ),
                   ),
                 ),
-              );
-            }).toList(),
+              ),
+            ],
           ),
+
+          if (_useCustomAlertHours) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFF10B981),
+                  width: 2,
+                ),
+              ),
+              child: TextField(
+                controller: _alertHoursController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(
+                  fontSize: 16.0,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '시간 입력 (1-72)',
+                  hintStyle: TextStyle(
+                    color: Color(0xFF9CA3AF),
+                    fontSize: 14.0,
+                  ),
+                  suffixText: '시간',
+                  suffixStyle: TextStyle(
+                    color: Color(0xFF10B981),
+                    fontSize: 14.0,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 12),
+                ),
+                onChanged: (value) {
+                  final hours = int.tryParse(value);
+                  if (hours != null && hours >= 1 && hours <= 72) {
+                    setState(() {
+                      _alertHours = hours;
+                    });
+                    // Add slight delay to prevent rapid updates
+                    Future.delayed(const Duration(milliseconds: 500), () {
+                      _updateSettings();
+                    });
+                  }
+                },
+              ),
+            ),
+          ],
 
           const SizedBox(height: 12),
 

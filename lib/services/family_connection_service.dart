@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math';
 import 'dart:typed_data';
@@ -112,6 +113,13 @@ class FamilyConnectionService with AppLogger {
     String elderlyName,
   ) async {
     try {
+      // Create connection code lookup document for secure family joining
+      await _firestore.collection('connection_codes').doc(connectionCode).set({
+        'familyId': familyId,
+        'elderlyName': elderlyName,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
       await _firestore.collection(AppConstants.collectionFamilies).doc(familyId).set({
         'familyId': familyId,
         'connectionCode': connectionCode,
@@ -175,16 +183,31 @@ class FamilyConnectionService with AppLogger {
 
   Future<Result<Map<String, dynamic>>> getFamilyInfo(String connectionCode) async {
     try {
-      final query = await _firestore
-          .collection(AppConstants.collectionFamilies)
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
+      // First, get family ID from secure connection code lookup
+      final connectionDoc = await _firestore
+          .collection('connection_codes')
+          .doc(connectionCode)
           .get();
 
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        final data = doc.data();
-        data['familyId'] = doc.id;
+      if (!connectionDoc.exists) {
+        return const Failure(AccountRecoveryException(
+          message: AppConstants.errorConnectionNotFound,
+          errorType: AccountRecoveryErrorType.connectionCodeNotFound,
+        ));
+      }
+
+      final connectionData = connectionDoc.data()!;
+      final familyId = connectionData['familyId'] as String;
+
+      // Now get the full family data (user must have permission)
+      final familyDoc = await _firestore
+          .collection(AppConstants.collectionFamilies)
+          .doc(familyId)
+          .get();
+
+      if (familyDoc.exists) {
+        final data = familyDoc.data()!;
+        data['familyId'] = familyDoc.id;
         return Success(data);
       }
       
@@ -290,13 +313,13 @@ class FamilyConnectionService with AppLogger {
 
   Future<Result<bool>> setApprovalStatus(String connectionCode, bool approved) async {
     try {
-      final query = await _firestore
-          .collection(AppConstants.collectionFamilies)
-          .where('connectionCode', isEqualTo: connectionCode)
-          .limit(1)
+      // First, get family ID from secure connection code lookup
+      final connectionDoc = await _firestore
+          .collection('connection_codes')
+          .doc(connectionCode)
           .get();
 
-      if (query.docs.isEmpty) {
+      if (!connectionDoc.exists) {
         logWarning('No family found with connection code: $connectionCode');
         return const Failure(AccountRecoveryException(
           message: AppConstants.errorConnectionNotFound,
@@ -304,10 +327,19 @@ class FamilyConnectionService with AppLogger {
         ));
       }
 
-      final familyId = query.docs.first.id;
+      final connectionData = connectionDoc.data()!;
+      final familyId = connectionData['familyId'] as String;
+
+      // Update approval status and add current user as family member
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        return const Failure(ServiceException(message: 'User not authenticated'));
+      }
+
       await _firestore.collection(AppConstants.collectionFamilies).doc(familyId).update({
         'approved': approved,
         'approvedAt': FieldValue.serverTimestamp(),
+        'memberIds': FieldValue.arrayUnion([currentUser.uid]),
       });
       
       return const Success(true);
