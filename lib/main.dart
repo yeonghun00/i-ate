@@ -15,6 +15,8 @@ import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
+import 'package:thanks_everyday/core/errors/app_exceptions.dart';
+import 'package:thanks_everyday/core/services/app_initialization_service.dart';
 import 'dart:async';
 
 void main() async {
@@ -86,6 +88,7 @@ class AppWrapper extends StatefulWidget {
 
 class _AppWrapperState extends State<AppWrapper> {
   final FirebaseService _firebaseService = FirebaseService();
+  final AppInitializationService _initService = AppInitializationService();
   bool _isLoading = true;
   bool _isSetup = false;
 
@@ -181,8 +184,21 @@ class _AppWrapperState extends State<AppWrapper> {
       // Note: alert_hours is now stored in Firebase only, not SharedPreferences
       
       
-      // Initialize services based on user settings from initial setup
-      await _initializeServicesAfterSetup();
+      // CRITICAL FIX: Use AppInitializationService to properly reload family data
+      AppLogger.info('Calling AppInitializationService.initializeServicesAfterSetup() to reload family data', tag: 'AppWrapper');
+      final result = await _initService.initializeServicesAfterSetup();
+      
+      result.fold(
+        onSuccess: (_) {
+          AppLogger.info('AppInitializationService completed successfully - family data reloaded', tag: 'AppWrapper');
+          _completeSetupWithStateUpdate();
+        },
+        onFailure: (error) {
+          AppLogger.error('AppInitializationService failed: ${error.message}', tag: 'AppWrapper');
+          // Still proceed with state update even if service init failed
+          _completeSetupWithStateUpdate();
+        },
+      );
       
     } catch (e) {
       AppLogger.error('Failed to store setup completion: $e', tag: 'AppWrapper');
@@ -220,77 +236,42 @@ class _AppWrapperState extends State<AppWrapper> {
       AppLogger.error('❌ Error checking MIUI guidance: $e', tag: 'AppWrapper');
     }
   }
-  
-  Future<void> _initializeServicesAfterSetup() async {
-    try {
-      await ScreenMonitorService.initialize();
-      await LocationService.initialize();
-      
-      final prefs = await SharedPreferences.getInstance();
-      final survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
-      final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
-      
-      AppLogger.info('🔧 Initializing services after setup completion:', tag: 'AppWrapper');
-      AppLogger.info('  - Survival signal: $survivalEnabled', tag: 'AppWrapper');
-      AppLogger.info('  - Location tracking: $locationEnabled', tag: 'AppWrapper');
-      
-      if (survivalEnabled) {
-        await ScreenMonitorService.enableSurvivalSignal();
-        AppLogger.info('✅ Survival signal monitoring enabled', tag: 'AppWrapper');
-        
-        // Survival signal monitoring enabled - native service will handle background updates
-        AppLogger.info('✅ Survival signal monitoring enabled after setup', tag: 'AppWrapper');
-      }
-      
-      if (locationEnabled) {
-        await LocationService.setLocationTrackingEnabled(true);
-        AppLogger.info('✅ Location tracking enabled', tag: 'AppWrapper');
-        
-        // Force immediate location update after setup
-        AppLogger.info('📍 Getting initial location after setup...', tag: 'AppWrapper');
-        final position = await LocationService.getCurrentLocation();
-        if (position != null) {
-          AppLogger.info('✅ Initial location obtained: ${position.latitude}, ${position.longitude}', tag: 'AppWrapper');
-        } else {
-          AppLogger.warning('❌ Failed to get initial location', tag: 'AppWrapper');
-        }
-      }
-    } catch (e) {
-      AppLogger.error('❌ Failed to initialize services after setup: $e', tag: 'AppWrapper');
-    }
-    
-    // Check for MIUI guidance after setup completion
-    await _checkMiuiGuidance();
 
-    // Use a more robust approach to ensure state update happens
-    if (mounted) {
-      setState(() {
-        _isSetup = true;
-      });
-      AppLogger.info('State updated: _isSetup = true', tag: 'AppWrapper');
-    } else {
-      AppLogger.warning('Widget not mounted, scheduling state update for next frame', tag: 'AppWrapper');
-      // Schedule the state update for the next frame when widget might be mounted
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _isSetup = true;
-          });
-          AppLogger.info('State updated via post-frame callback: _isSetup = true', tag: 'AppWrapper');
-        } else {
-          AppLogger.warning('Widget still not mounted after post-frame callback', tag: 'AppWrapper');
-          // Force rebuild the entire widget tree
-          scheduleMicrotask(() {
-            if (mounted) {
-              setState(() {
-                _isSetup = true;
-              });
-              AppLogger.info('State updated via microtask: _isSetup = true', tag: 'AppWrapper');
-            }
-          });
-        }
-      });
-    }
+  void _completeSetupWithStateUpdate() {
+    // Handle MIUI guidance and state update after proper service initialization
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      await _checkMiuiGuidance();
+
+      // Use a more robust approach to ensure state update happens
+      if (mounted) {
+        setState(() {
+          _isSetup = true;
+        });
+        AppLogger.info('State updated: _isSetup = true', tag: 'AppWrapper');
+      } else {
+        AppLogger.warning('Widget not mounted, scheduling state update for next frame', tag: 'AppWrapper');
+        // Schedule the state update for the next frame when widget might be mounted
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _isSetup = true;
+            });
+            AppLogger.info('State updated via post-frame callback: _isSetup = true', tag: 'AppWrapper');
+          } else {
+            AppLogger.warning('Widget still not mounted after post-frame callback', tag: 'AppWrapper');
+            // Force rebuild the entire widget tree
+            scheduleMicrotask(() {
+              if (mounted) {
+                setState(() {
+                  _isSetup = true;
+                });
+                AppLogger.info('State updated via microtask: _isSetup = true', tag: 'AppWrapper');
+              }
+            });
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -370,71 +351,49 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _initializeServices() async {
     try {
-      AppLogger.info('🔧 Starting service initialization with Firebase sync...', tag: 'HomePage');
+      AppLogger.info('🔧 HomePage service initialization - family data already loaded by AppInitializationService', tag: 'HomePage');
       
-      // CRITICAL FIX: Get settings from Firebase first, fallback to SharedPreferences
-      bool survivalEnabled = false;
-      bool locationEnabled = false;
+      // Family data should already be loaded by AppInitializationService.initializeServicesAfterSetup()
+      // This method now just handles immediate updates and service checks
       
-      // Try to get settings from Firebase first
-      if (_firebaseService.familyCode != null) {
-        try {
-          final familyInfo = await _firebaseService.getFamilyInfo(_firebaseService.familyCode!);
-          if (familyInfo != null && familyInfo['settings'] != null) {
-            final settings = familyInfo['settings'] as Map<String, dynamic>;
-            survivalEnabled = settings['survivalSignalEnabled'] ?? false;
-            AppLogger.info('🔥 Got survival signal from Firebase: $survivalEnabled', tag: 'HomePage');
-          }
-        } catch (e) {
-          AppLogger.warning('Failed to get settings from Firebase, using local: $e', tag: 'HomePage');
+      if (!_firebaseService.isSetup) {
+        AppLogger.error('❌ CRITICAL: FirebaseService family data not loaded in HomePage', tag: 'HomePage');
+        AppLogger.error('  - Family ID: ${_firebaseService.familyId}', tag: 'HomePage');
+        AppLogger.error('  - Family Code: ${_firebaseService.familyCode}', tag: 'HomePage');
+        
+        // Try to reload family data as fallback
+        AppLogger.info('🔄 Attempting to reload family data as fallback...', tag: 'HomePage');
+        final reloadSuccess = await _firebaseService.reloadFamilyData();
+        
+        if (!reloadSuccess) {
+          AppLogger.error('❌ Failed to reload family data in HomePage - services will not work', tag: 'HomePage');
+          return;
         }
       }
       
-      // Fallback to SharedPreferences if Firebase failed
+      AppLogger.info('✅ Firebase family data verified in HomePage:', tag: 'HomePage');
+      AppLogger.info('  - Family ID: ${_firebaseService.familyId}', tag: 'HomePage');
+      AppLogger.info('  - Family Code: ${_firebaseService.familyCode}', tag: 'HomePage');
+      AppLogger.info('  - Elderly Name: ${_firebaseService.elderlyName}', tag: 'HomePage');
+      
+      // Services should already be initialized by AppInitializationService
+      // Just force immediate updates for current session
+      
+      // CRITICAL FIX: Force immediate Firebase activity sync
+      AppLogger.info('📱 Forcing immediate Firebase activity sync...', tag: 'HomePage');
+      await _firebaseService.updatePhoneActivity(forceImmediate: true);
+      AppLogger.info('✅ Immediate Firebase activity sync completed', tag: 'HomePage');
+      
+      // Try to update location if location service was enabled
       final prefs = await SharedPreferences.getInstance();
-      if (!survivalEnabled) {
-        survivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
-      }
-      locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
-      
-      AppLogger.info('🔧 Final settings - Survival: $survivalEnabled, Location: $locationEnabled', tag: 'HomePage');
-      
-      AppLogger.info('🔧 Initializing ScreenMonitorService...', tag: 'HomePage');
-      await ScreenMonitorService.initialize();
-      AppLogger.info('✅ ScreenMonitorService.initialize() completed', tag: 'HomePage');
-      
-      await LocationService.initialize();
-      await FoodTrackingService.initialize();
-      
-      if (survivalEnabled) {
-        AppLogger.info('🔧 Enabling survival signal...', tag: 'HomePage');
-        await ScreenMonitorService.enableSurvivalSignal();
-        AppLogger.info('✅ Survival signal enabled', tag: 'HomePage');
-        
-        AppLogger.info('🔄 Starting WorkManager for background updates...', tag: 'HomePage');
-        await ScreenMonitorService.startMonitoring();
-        AppLogger.info('✅ WorkManager scheduled for 2-minute updates', tag: 'HomePage');
-        
-        // CRITICAL FIX: Force immediate Firebase sync
-        AppLogger.info('🔄 Forcing immediate Firebase activity sync...', tag: 'HomePage');
-        await _firebaseService.updatePhoneActivity(forceImmediate: true);
-        AppLogger.info('✅ Immediate Firebase sync completed', tag: 'HomePage');
-        
-        AppLogger.info('✅ Background phone activity monitoring started', tag: 'HomePage');
-      } else {
-        AppLogger.info('❌ Survival signal is disabled', tag: 'HomePage');
-      }
+      final locationEnabled = prefs.getBool('flutter.location_tracking_enabled') ?? false;
       
       if (locationEnabled) {
-        await LocationService.setLocationTrackingEnabled(true);
-        AppLogger.info('✅ Location tracking started', tag: 'HomePage');
-        
         AppLogger.info('📍 Getting immediate location and syncing to Firebase...', tag: 'HomePage');
         final position = await LocationService.getCurrentLocation();
         if (position != null) {
-          AppLogger.info('✅ Location updated: ${position.latitude}, ${position.longitude}', tag: 'HomePage');
+          AppLogger.info('✅ Location obtained: ${position.latitude}, ${position.longitude}', tag: 'HomePage');
           
-          // CRITICAL FIX: Force immediate location sync to Firebase
           try {
             await _firebaseService.updateLocation(
               latitude: position.latitude,
@@ -446,20 +405,12 @@ class _HomePageState extends State<HomePage> {
             AppLogger.error('❌ Failed to sync location to Firebase: $e', tag: 'HomePage');
           }
         } else {
-          AppLogger.warning('❌ Failed to get initial location', tag: 'HomePage');
+          AppLogger.warning('❌ Failed to get location', tag: 'HomePage');
         }
       }
+      
     } catch (e) {
-      AppLogger.error('❌ Service initialization failed: $e', tag: 'HomePage');
-    }
-    
-    // CRITICAL FIX: Always update general activity regardless of service settings
-    try {
-      AppLogger.info('📱 Updating general phone activity...', tag: 'HomePage');
-      await _firebaseService.updatePhoneActivity(forceImmediate: true);
-      AppLogger.info('✅ General phone activity updated', tag: 'HomePage');
-    } catch (e) {
-      AppLogger.error('❌ Failed to update general phone activity: $e', tag: 'HomePage');
+      AppLogger.error('❌ HomePage service initialization failed: $e', tag: 'HomePage');
     }
   }
 

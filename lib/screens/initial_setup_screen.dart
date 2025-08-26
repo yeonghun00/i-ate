@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thanks_everyday/services/secure_family_connection_service.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
 import 'package:thanks_everyday/screens/guide_screen.dart';
 // Settings screen import removed - not used in initial setup
@@ -9,6 +10,7 @@ import 'package:thanks_everyday/screens/account_recovery_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'dart:async';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
+import 'package:thanks_everyday/core/errors/app_exceptions.dart';
 
 class InitialSetupScreen extends StatefulWidget {
   final VoidCallback onSetupComplete;
@@ -22,6 +24,7 @@ class InitialSetupScreen extends StatefulWidget {
 class _InitialSetupScreenState extends State<InitialSetupScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _alertHoursController = TextEditingController();
+  final SecureFamilyConnectionService _secureService = SecureFamilyConnectionService();
   final FirebaseService _firebaseService = FirebaseService();
 
   bool _isLoading = false;
@@ -51,55 +54,63 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     });
 
     try {
-      // Generate code and save to Firebase immediately
-      final generatedCode = await _firebaseService.setupFamilyCode(
+      // Use secure family connection service for family creation
+      final result = await _secureService.setupFamilyCode(
         _nameController.text.trim(),
       );
 
-      if (generatedCode != null) {
-        // Update Firebase settings with correct alert hours
-        AppLogger.info('Saving alert hours to Firebase: $_alertHours', tag: 'InitialSetupScreen');
-        final settingsUpdated = await _firebaseService.updateFamilySettings(
-          survivalSignalEnabled: _survivalSignalEnabled,
-          familyContact: '',
-          alertHours: _alertHours,
-        );
-        
-        if (!settingsUpdated) {
-          AppLogger.error('Failed to save settings to Firebase', tag: 'InitialSetupScreen');
-        }
+      result.fold(
+        onSuccess: (generatedCode) async {
+          // Update Firebase settings with correct alert hours
+          AppLogger.info('Saving alert hours to Firebase: $_alertHours', tag: 'InitialSetupScreen');
+          final settingsUpdated = await _firebaseService.updateFamilySettings(
+            survivalSignalEnabled: _survivalSignalEnabled,
+            familyContact: '',
+            alertHours: _alertHours,
+          );
+          
+          if (!settingsUpdated) {
+            AppLogger.error('Failed to save settings to Firebase', tag: 'InitialSetupScreen');
+          }
 
-        // Save only essential settings to SharedPreferences (Firebase is primary source for alert hours)
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool(
-          'flutter.survival_signal_enabled',
-          _survivalSignalEnabled,
-        );
-        await prefs.setBool(
-          'flutter.location_tracking_enabled',
-          _locationTrackingEnabled,
-        );
-        // Note: alert_hours is now stored in Firebase only
+          // Save only essential settings to SharedPreferences (Firebase is primary source for alert hours)
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(
+            'flutter.survival_signal_enabled',
+            _survivalSignalEnabled,
+          );
+          await prefs.setBool(
+            'flutter.location_tracking_enabled',
+            _locationTrackingEnabled,
+          );
+          // Note: alert_hours is now stored in Firebase only
 
-        // Family data is now stored directly in Firebase - no temporary storage needed
+          // Family data is now stored directly in Firebase - no temporary storage needed
+          
+          // CRITICAL: Reload family data into FirebaseService so GPS/survival/meals work
+          AppLogger.info('Reloading family data into FirebaseService after secure setup', tag: 'InitialSetupScreen');
+          final familyDataLoaded = await _firebaseService.reloadFamilyData();
+          AppLogger.info('Firebase family data reloaded: $familyDataLoaded', tag: 'InitialSetupScreen');
 
-        setState(() {
-          _generatedCode = generatedCode;
-          _isWaitingForApproval = true;
-        });
+          setState(() {
+            _generatedCode = generatedCode;
+            _isWaitingForApproval = true;
+          });
 
-        // Start listening for approval from child app
-        _startListeningForApproval();
+          // Start listening for approval from child app
+          _startListeningForApproval();
 
-        // Also start polling as backup
-        _startPollingForApproval();
+          // Also start polling as backup
+          _startPollingForApproval();
 
-        // Start 2-minute timeout timer and countdown
-        _startTimeoutTimer();
-        _startCountdownTimer();
-      } else {
-        _showMessage('설정에 실패했습니다. 다시 시도해주세요.');
-      }
+          // Start 2-minute timeout timer and countdown
+          _startTimeoutTimer();
+          _startCountdownTimer();
+        },
+        onFailure: (error) {
+          _showMessage('설정에 실패했습니다: ${error.message}');
+        },
+      );
     } catch (e) {
       _showMessage('오류가 발생했습니다: $e');
     } finally {
@@ -114,11 +125,11 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
 
     AppLogger.info('Starting to listen for approval for code: $_generatedCode', tag: 'InitialSetupScreen');
 
-    // Listen to Firebase for approval changes with error handling
-    _approvalSubscription = _firebaseService
+    // Listen to Firebase for approval changes with error handling (use secure service)
+    _approvalSubscription = _secureService
         .listenForApproval(_generatedCode!)
         .listen(
-          (approved) {
+          (approved) async {
             AppLogger.info('Approval status changed: $approved', tag: 'InitialSetupScreen');
 
             if (mounted) {
@@ -138,6 +149,9 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                 });
 
                 _showMessage('자녀가 승인했습니다! 앱을 시작합니다.');
+
+                // Ensure family data is loaded after approval
+                await _firebaseService.reloadFamilyData();
 
                 // Navigate immediately without delay
                 if (mounted) {
@@ -175,41 +189,47 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     if (_generatedCode == null) return;
 
     try {
-      final familyInfo = await _firebaseService.getFamilyInfo(_generatedCode!);
-      if (familyInfo != null) {
-        final approved = familyInfo['approved'] as bool?;
-        AppLogger.debug('Manual refresh - approved: $approved', tag: 'InitialSetupScreen');
+      final result = await _secureService.getFamilyInfoForChild(_generatedCode!);
+      result.fold(
+        onSuccess: (familyInfo) async {
+          final approved = familyInfo['approved'] as bool?;
+          AppLogger.debug('Manual refresh - approved: $approved', tag: 'InitialSetupScreen');
 
-        if (mounted) {
-          if (approved == true) {
-            _approvalSubscription?.cancel();
-            _pollingTimer?.cancel();
-            _timeoutTimer?.cancel();
-            _countdownTimer?.cancel();
+          if (mounted) {
+            if (approved == true) {
+              _approvalSubscription?.cancel();
+              _pollingTimer?.cancel();
+              _timeoutTimer?.cancel();
+              _countdownTimer?.cancel();
 
-            setState(() {
-              _isWaitingForApproval = false;
-              _isLoading = true;
-            });
+              setState(() {
+                _isWaitingForApproval = false;
+                _isLoading = true;
+              });
 
-            _showMessage('자녀가 승인했습니다! 앱을 시작합니다.');
+              _showMessage('자녀가 승인했습니다! 앱을 시작합니다.');
 
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (context) =>
-                    GuideScreen(onGuideComplete: widget.onSetupComplete),
-              ),
-            );
-          } else if (approved == false) {
-            setState(() {
-              _isWaitingForApproval = false;
-            });
+              // Ensure family data is loaded after approval
+              await _firebaseService.reloadFamilyData();
 
-            _showMessage('자녀가 거부했습니다. 다시 설정해주세요.');
-            _resetSetup();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) =>
+                      GuideScreen(onGuideComplete: widget.onSetupComplete),
+                ),
+              );
+            } else if (approved == false) {
+              setState(() {
+                _isWaitingForApproval = false;
+              });
+
+              _showMessage('자녀가 거부했습니다. 다시 설정해주세요.');
+              _resetSetup();
+            }
           }
-        }
-      }
+        },
+        onFailure: (error) => AppLogger.error('Manual refresh error: ${error.message}', tag: 'InitialSetupScreen'),
+      );
     } catch (e) {
       AppLogger.error('Manual refresh error: $e', tag: 'InitialSetupScreen');
     }
@@ -228,46 +248,50 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       }
 
       try {
-        final familyInfo = await _firebaseService.getFamilyInfo(
-          _generatedCode!,
-        );
-        if (familyInfo != null) {
-          final approved = familyInfo['approved'] as bool?;
-          AppLogger.debug('Polling check - approved: $approved', tag: 'InitialSetupScreen');
+        final result = await _secureService.getFamilyInfoForChild(_generatedCode!);
+        result.fold(
+          onSuccess: (familyInfo) async {
+            final approved = familyInfo['approved'] as bool?;
+            AppLogger.debug('Polling check - approved: $approved', tag: 'InitialSetupScreen');
 
-          if (approved != null && mounted) {
-            if (approved == true) {
-              timer.cancel();
-              _approvalSubscription?.cancel();
-              _timeoutTimer?.cancel();
-              _countdownTimer?.cancel();
+            if (approved != null && mounted) {
+              if (approved == true) {
+                timer.cancel();
+                _approvalSubscription?.cancel();
+                _timeoutTimer?.cancel();
+                _countdownTimer?.cancel();
 
-              setState(() {
-                _isWaitingForApproval = false;
-                _isLoading = true;
-              });
+                setState(() {
+                  _isWaitingForApproval = false;
+                  _isLoading = true;
+                });
 
-              _showMessage('자녀가 승인했습니다! 앱을 시작합니다.');
+                _showMessage('자녀가 승인했습니다! 앱을 시작합니다.');
 
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (context) =>
-                      GuideScreen(onGuideComplete: widget.onSetupComplete),
-                ),
-              );
-            } else if (approved == false) {
-              timer.cancel();
-              _timeoutTimer?.cancel();
-              _countdownTimer?.cancel();
-              setState(() {
-                _isWaitingForApproval = false;
-              });
+                // Ensure family data is loaded after approval
+                await _firebaseService.reloadFamilyData();
 
-              _showMessage('자녀가 거부했습니다. 다시 설정해주세요.');
-              _resetSetup();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        GuideScreen(onGuideComplete: widget.onSetupComplete),
+                  ),
+                );
+              } else if (approved == false) {
+                timer.cancel();
+                _timeoutTimer?.cancel();
+                _countdownTimer?.cancel();
+                setState(() {
+                  _isWaitingForApproval = false;
+                });
+
+                _showMessage('자녀가 거부했습니다. 다시 설정해주세요.');
+                _resetSetup();
+              }
             }
-          }
-        }
+          },
+          onFailure: (error) => AppLogger.error('Polling error: ${error.message}', tag: 'InitialSetupScreen'),
+        );
       } catch (e) {
         AppLogger.error('Polling error: $e', tag: 'InitialSetupScreen');
       }
@@ -285,10 +309,13 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         _pollingTimer?.cancel();
         _countdownTimer?.cancel();
 
-        // Delete from Firebase
+        // Delete from Firebase using secure service
         try {
-          await _firebaseService.deleteFamilyCode(_generatedCode!);
-          AppLogger.info('Family code $_generatedCode deleted due to timeout', tag: 'InitialSetupScreen');
+          final result = await _secureService.deleteFamilyCode(_generatedCode!);
+          result.fold(
+            onSuccess: (success) => AppLogger.info('Family code $_generatedCode deleted due to timeout', tag: 'InitialSetupScreen'),
+            onFailure: (error) => AppLogger.error('Failed to delete family code on timeout: ${error.message}', tag: 'InitialSetupScreen'),
+          );
         } catch (e) {
           AppLogger.error('Failed to delete family code on timeout: $e', tag: 'InitialSetupScreen');
         }
@@ -335,11 +362,14 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     _timeoutTimer?.cancel();
     _countdownTimer?.cancel();
 
-    // Delete from Firebase
+    // Delete from Firebase using secure service
     if (_generatedCode != null) {
       try {
-        await _firebaseService.deleteFamilyCode(_generatedCode!);
-        AppLogger.info('Family code $_generatedCode deleted by user reset', tag: 'InitialSetupScreen');
+        final result = await _secureService.deleteFamilyCode(_generatedCode!);
+        result.fold(
+          onSuccess: (success) => AppLogger.info('Family code $_generatedCode deleted by user reset', tag: 'InitialSetupScreen'),
+          onFailure: (error) => AppLogger.error('Failed to delete family code: ${error.message}', tag: 'InitialSetupScreen'),
+        );
       } catch (e) {
         AppLogger.error('Failed to delete family code: $e', tag: 'InitialSetupScreen');
       }

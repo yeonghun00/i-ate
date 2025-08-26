@@ -16,6 +16,41 @@ class SecureFamilyConnectionService with AppLogger {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // Security audit logging
+  Future<void> _logSecurityEvent(String event, Map<String, dynamic> details) async {
+    try {
+      await _firestore.collection('audit_logs').add({
+        'event': event,
+        'userId': _auth.currentUser?.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+        'details': details,
+        'service': 'SecureFamilyConnectionService',
+      });
+    } catch (e) {
+      logError('Failed to log security event: $e');
+    }
+  }
+
+  // Rate limiting for connection attempts
+  static DateTime? _lastConnectionAttempt;
+  static int _connectionAttemptCount = 0;
+  static const int maxConnectionAttemptsPerHour = 10;
+  
+  bool _canAttemptConnection() {
+    final now = DateTime.now();
+    if (_lastConnectionAttempt != null && now.difference(_lastConnectionAttempt!).inHours < 1) {
+      return _connectionAttemptCount < maxConnectionAttemptsPerHour;
+    }
+    // Reset counter after an hour
+    _connectionAttemptCount = 0;
+    return true;
+  }
+  
+  void _recordConnectionAttempt() {
+    _lastConnectionAttempt = DateTime.now();
+    _connectionAttemptCount++;
+  }
+
   // =======================================================
   // PARENT APP METHODS (Anonymous Auth)
   // =======================================================
@@ -127,6 +162,23 @@ class SecureFamilyConnectionService with AppLogger {
   /// Get family info for child app (secure lookup via connection codes)
   Future<Result<Map<String, dynamic>>> getFamilyInfoForChild(String connectionCode) async {
     try {
+      // Check rate limiting
+      if (!_canAttemptConnection()) {
+        logWarning('Rate limit exceeded for connection attempts');
+        await _logSecurityEvent('connection_rate_limit_exceeded', {
+          'connectionCode': connectionCode,
+          'attemptCount': _connectionAttemptCount,
+        });
+        return const Failure(ServiceException(
+          message: 'Too many connection attempts. Please wait an hour before trying again.',
+        ));
+      }
+      
+      _recordConnectionAttempt();
+      await _logSecurityEvent('connection_attempt', {
+        'connectionCode': connectionCode,
+        'attemptCount': _connectionAttemptCount,
+      });
       logInfo('Child app getting family info for code: $connectionCode');
 
       // First, resolve family ID from secure connection code lookup

@@ -18,6 +18,22 @@ class FirebaseService {
   String? _familyId;
   String? _familyCode;
   String? _elderlyName;
+
+  // Security audit logging
+  Future<void> _logSecurityEvent(String event, Map<String, dynamic> details) async {
+    try {
+      await _firestore.collection('audit_logs').add({
+        'event': event,
+        'userId': _auth.currentUser?.uid,
+        'familyId': _familyId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'details': details,
+        'userAgent': 'Flutter App', // Could be enhanced with device info
+      });
+    } catch (e) {
+      AppLogger.error('Failed to log security event: $e', tag: 'FirebaseService');
+    }
+  }
   
   // Activity batching variables
   DateTime? _lastActivityBatch;
@@ -90,6 +106,26 @@ class FirebaseService {
       return _familyCode != null;
     } catch (e) {
       AppLogger.error('Firebase initialization failed: $e', tag: 'FirebaseService');
+      return false;
+    }
+  }
+
+  /// Reload family data from SharedPreferences (call after secure family setup)
+  Future<bool> reloadFamilyData() async {
+    try {
+      AppLogger.info('Reloading family data from SharedPreferences after setup', tag: 'FirebaseService');
+      
+      final prefs = await SharedPreferences.getInstance();
+      _familyId = prefs.getString('family_id');
+      _familyCode = prefs.getString('family_code');
+      _elderlyName = prefs.getString('elderly_name');
+
+      final hasFamily = _familyCode != null && _familyId != null;
+      AppLogger.info('Family data reloaded successfully - hasFamily: $hasFamily, familyId: $_familyId, familyCode: $_familyCode', tag: 'FirebaseService');
+      
+      return hasFamily;
+    } catch (e) {
+      AppLogger.error('Failed to reload family data: $e', tag: 'FirebaseService');
       return false;
     }
   }
@@ -1482,6 +1518,7 @@ class FirebaseService {
       return false;
     }
   }
+
 
   // Getters
   String? get familyId => _familyId;

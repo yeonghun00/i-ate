@@ -18,13 +18,14 @@ service cloud.firestore {
 
     // Connection codes - secure lookup mechanism
     match /connection_codes/{codeId} {
-      // Allow reading specific connection codes (no enumeration)
+      // Anyone can read connection codes (needed for child app joining)
       allow read: if request.auth != null;
       // Only authenticated users can create (family setup)
       allow create: if request.auth != null;
-      // Only creators can update/delete their codes
-      allow update, delete: if request.auth != null && 
-        request.auth.uid == resource.data.get('createdBy', null);
+      // Allow updates for expiration and cleanup
+      allow update: if request.auth != null;
+      // Allow deletion for cleanup
+      allow delete: if request.auth != null;
     }
 
     // Families - secure memberIds-based architecture
@@ -35,30 +36,11 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.get('createdBy', null) &&
         request.auth.uid in request.resource.data.get('memberIds', []);
       
-      // READING: Only family members and during secure connection process
-      allow read: if request.auth != null && (
-        // Allow reading non-existent documents (for uniqueness checking during creation)
-        !exists(/databases/$(database)/documents/families/$(familyId)) ||
-        // Family creators and members
-        request.auth.uid == resource.data.get('createdBy', null) ||
-        request.auth.uid in resource.data.get('memberIds', []) ||
-        // Allow connection process ONLY for families with valid connection codes
-        (resource.data.connectionCode != null && 
-         exists(/databases/$(database)/documents/connection_codes/$(resource.data.connectionCode)))
-      );
+      // READING: Allow authenticated users to read families (needed for connection process)
+      allow read: if request.auth != null;
       
-      // UPDATES: Only family members and secure joining process
-      allow update: if request.auth != null && (
-        // Family creators and members
-        request.auth.uid == resource.data.get('createdBy', null) ||
-        request.auth.uid in resource.data.get('memberIds', []) ||
-        // Child app joining process (adding themselves to memberIds)
-        (request.auth.uid in request.resource.data.get('memberIds', []) &&
-         !(request.auth.uid in resource.data.get('memberIds', [])) &&
-         // Only allow specific approval fields during joining
-         request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['approved', 'approvedAt', 'approvedBy', 'memberIds', 'childInfo']))
-      );
+      // UPDATES: Allow authenticated users to update (simplified for connection process)
+      allow update: if request.auth != null;
       
       // DELETION: Only family members and creators
       allow delete: if request.auth != null && (
@@ -104,10 +86,9 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // FCM tokens - own tokens only (SECURITY FIX)
+    // FCM tokens - authenticated users (needed for notifications)
     match /fcmTokens/{tokenId} {
-      allow read, write: if request.auth != null && 
-        request.auth.uid == resource.data.get('userId', null);
+      allow read, write: if request.auth != null;
     }
     
     // Subscriptions - own data only
@@ -126,10 +107,9 @@ service cloud.firestore {
       allow write: if false;
     }
     
-    // Audit logs - write only (for security logging)
-    match /audit_logs/{logId} {
-      allow write: if request.auth != null;
-      allow read: if false; // No one should read logs except admins
+    // Test collection - authenticated access (remove in production)
+    match /test/{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }

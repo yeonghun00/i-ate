@@ -171,6 +171,19 @@ class AppInitializationService {
     try {
       logInfo('Initializing services after setup completion');
       
+      // CRITICAL FIX: Reload FirebaseService family data after setup
+      logInfo('Reloading FirebaseService family data after setup');
+      final familyDataReloaded = await _firebaseService.reloadFamilyData();
+      
+      if (!familyDataReloaded) {
+        logError('Failed to reload family data - GPS, meal, and survival services will not work');
+        return Failure(ServiceException(
+          message: 'Failed to reload family data after setup',
+        ));
+      }
+      
+      logInfo('Family data reloaded successfully, continuing with service initialization');
+      
       await ScreenMonitorService.initialize();
       
       final prefs = await SharedPreferences.getInstance();
@@ -180,6 +193,7 @@ class AppInitializationService {
       logInfo('Service initialization settings:');
       logInfo('  - Survival signal: $survivalEnabled');
       logInfo('  - Location tracking: $locationEnabled');
+      logInfo('  - Firebase family data: ${_firebaseService.isSetup}');
       
       if (survivalEnabled) {
         await _enableSurvivalSignal();
@@ -189,7 +203,7 @@ class AppInitializationService {
         await _enableLocationTracking();
       }
       
-      logInfo('Services initialized successfully after setup');
+      logInfo('Services initialized successfully after setup with family data loaded');
       return const Success(null);
       
     } catch (e, stackTrace) {
