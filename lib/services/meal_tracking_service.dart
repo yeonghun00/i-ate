@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:thanks_everyday/core/constants/app_constants.dart';
 import 'package:thanks_everyday/core/errors/app_exceptions.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 import 'package:thanks_everyday/services/fcm_v1_service.dart';
+import 'package:thanks_everyday/services/auth/firebase_auth_manager.dart';
 
 class MealTrackingService with AppLogger {
   static final MealTrackingService _instance = MealTrackingService._internal();
@@ -11,7 +11,7 @@ class MealTrackingService with AppLogger {
   MealTrackingService._internal();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuthManager _authManager = FirebaseAuthManager();
 
   Future<Result<bool>> saveMealRecord({
     required String familyId,
@@ -74,12 +74,14 @@ class MealTrackingService with AppLogger {
 
   Future<Result<bool>> _ensureAuthentication() async {
     try {
-      if (_auth.currentUser == null) {
-        logInfo('No authenticated user, attempting to re-authenticate');
-        await _auth.signInAnonymously();
-        logInfo('Re-authentication successful');
+      logInfo('Ensuring authentication');
+      if (await _authManager.ensureAuthenticated()) {
+        logInfo('Authentication successful');
+        return const Success(true);
+      } else {
+        logError('Authentication failed');
+        return const Failure(AuthenticationException(message: 'Authentication failed'));
       }
-      return const Success(true);
       
     } catch (e, stackTrace) {
       logError('Authentication failed', error: e, stackTrace: stackTrace);

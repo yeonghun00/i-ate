@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/services/fcm_v1_service.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
-import 'dart:math' show sin, cos, asin, sqrt, Random;
-// dart:convert import removed - not used in current implementation
-import 'dart:typed_data';
+import 'package:thanks_everyday/services/auth/firebase_auth_manager.dart';
+import 'package:thanks_everyday/services/storage/local_storage_manager.dart';
+import 'package:thanks_everyday/services/family/family_id_generator.dart';
+import 'package:thanks_everyday/services/family/family_data_manager.dart';
+import 'package:thanks_everyday/services/location/location_throttler.dart';
+import 'package:thanks_everyday/services/activity/activity_batcher.dart';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
@@ -13,79 +14,28 @@ class FirebaseService {
   FirebaseService._internal();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseAuthManager _authManager = FirebaseAuthManager();
+  final LocalStorageManager _storage = LocalStorageManager();
+  final FamilyDataManager _familyData = FamilyDataManager();
+  final LocationThrottler _locationThrottler = LocationThrottler();
+  final ActivityBatcher _activityBatcher = ActivityBatcher();
 
   String? _familyId;
   String? _familyCode;
   String? _elderlyName;
-  
-  // Activity batching variables
-  DateTime? _lastActivityBatch;
-  DateTime? _lastScreenActivity;
-  static const Duration _activityBatchInterval = Duration(hours: 2);
-  static const Duration _longInactivityThreshold = Duration(hours: 8);
-  
-  // Location throttling variables
-  double? _lastStoredLatitude;
-  double? _lastStoredLongitude;
-  DateTime? _lastLocationUpdate;
-  static const double _significantDistanceKm = 0.5; // Reduced to 500m threshold for better tracking
 
-  // Initialize Firebase and check for existing family code
   Future<bool> initialize() async {
     try {
       // Initialize FCM v1 service
       await FCMv1Service.initialize();
 
-      // Sign in anonymously for Firebase Auth with retry logic
-      int authRetryCount = 0;
-      const maxAuthRetries = 3;
-      
-      while (_auth.currentUser == null && authRetryCount < maxAuthRetries) {
-        try {
-          AppLogger.info('Attempting Firebase Auth (attempt ${authRetryCount + 1}/$maxAuthRetries)', tag: 'FirebaseService');
-          await _auth.signInAnonymously();
-          AppLogger.info('Firebase Auth successful', tag: 'FirebaseService');
-          break;
-        } catch (authError) {
-          authRetryCount++;
-          AppLogger.warning('Firebase Auth attempt $authRetryCount failed: $authError', tag: 'FirebaseService');
-          
-          if (authRetryCount < maxAuthRetries) {
-            await Future.delayed(Duration(milliseconds: 1000 * authRetryCount));
-          } else {
-            AppLogger.warning('All Firebase Auth attempts failed, continuing without auth', tag: 'FirebaseService');
-            // This will cause Firestore operations to fail, but app won't crash
-          }
-        }
-      }
+      // Authenticate using manager
+      await _authManager.ensureAuthenticated();
 
-      // Check if family code exists locally with retry logic
-      SharedPreferences? prefs;
-      int retryCount = 0;
-      const maxRetries = 3;
-
-      while (prefs == null && retryCount < maxRetries) {
-        try {
-          prefs = await SharedPreferences.getInstance();
-        } catch (e) {
-          AppLogger.error('SharedPreferences attempt ${retryCount + 1} failed: $e', tag: 'FirebaseService');
-          retryCount++;
-          if (retryCount < maxRetries) {
-            await Future.delayed(Duration(milliseconds: 500 * retryCount));
-          }
-        }
-      }
-
-      if (prefs != null) {
-        _familyId = prefs.getString('family_id');
-        _familyCode = prefs.getString('family_code');
-        _elderlyName = prefs.getString('elderly_name');
-      } else {
-        AppLogger.warning('SharedPreferences failed completely, using in-memory storage', tag: 'FirebaseService');
-        // If SharedPreferences fails, we'll continue without local storage
-        // The app will still work but won't persist the family code
-      }
+      // Load family data from local storage
+      _familyId = await _storage.getString('family_id');
+      _familyCode = await _storage.getString('family_code');
+      _elderlyName = await _storage.getString('elderly_name');
 
       return _familyCode != null;
     } catch (e) {
@@ -94,16 +44,12 @@ class FirebaseService {
     }
   }
 
-  // Generate a unique 4-digit connection code
   Future<String> _generateConnectionCode() async {
     String code;
     bool isUnique = false;
 
     do {
-      // Generate 4-digit code
-      code = (1000 + Random().nextInt(9000)).toString();
-
-      // Check if connection code already exists
+      code = FamilyIdGenerator.generateConnectionCode();
       final query = await _firestore
           .collection('families')
           .where('connectionCode', isEqualTo: code)
@@ -113,28 +59,6 @@ class FirebaseService {
     } while (!isUnique);
 
     return code;
-  }
-
-  // Generate a cryptographically secure unique family ID using UUID v4
-  String _generateFamilyId() {
-    // Generate a UUID v4 using cryptographically secure random bytes
-    final random = Random.secure();
-    
-    // Generate 16 random bytes for UUID
-    final bytes = Uint8List(16);
-    for (int i = 0; i < 16; i++) {
-      bytes[i] = random.nextInt(256);
-    }
-    
-    // Set version (4) and variant bits according to RFC 4122
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant bits
-    
-    // Convert to UUID string format
-    final hex = bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
-    final uuid = '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
-    
-    return 'family_$uuid';
   }
 
   // Recovery code generation removed - using name + connection code only
@@ -160,7 +84,6 @@ class FirebaseService {
     }
   }
   
-  // Generate a unique family ID with collision detection
   Future<String> _generateUniqueFamilyId() async {
     String familyId;
     bool isUnique = false;
@@ -168,9 +91,8 @@ class FirebaseService {
     const maxAttempts = 5;
     
     do {
-      familyId = _generateFamilyId();
+      familyId = FamilyIdGenerator.generateFamilyId();
       
-      // Check if family ID already exists in Firestore
       final docSnapshot = await _firestore.collection('families').doc(familyId).get();
       isUnique = !docSnapshot.exists;
       
@@ -191,18 +113,9 @@ class FirebaseService {
   ) async {
     try {
       // Ensure user is authenticated
-      if (_auth.currentUser == null) {
-        AppLogger.info('User not authenticated, attempting to sign in...', tag: 'FirebaseService');
-        try {
-          await _auth.signInAnonymously();
-          AppLogger.info('Anonymous sign-in successful', tag: 'FirebaseService');
-        } catch (authError) {
-          AppLogger.error('Failed to authenticate: $authError', tag: 'FirebaseService');
-          return false;
-        }
-      }
+      await _authManager.ensureAuthenticated();
 
-      final currentUserId = _auth.currentUser?.uid;
+      final currentUserId = _authManager.currentUserId;
       if (currentUserId == null || currentUserId.isEmpty) {
         AppLogger.error('No valid user ID available', tag: 'FirebaseService');
         return false;
@@ -252,28 +165,10 @@ class FirebaseService {
         'lastPhoneActivity': null, // Initialize field for phone activity tracking
       });
 
-      // Save locally with retry logic
-      SharedPreferences? prefs;
-      int retryCount = 0;
-      const maxRetries = 3;
-
-      while (prefs == null && retryCount < maxRetries) {
-        try {
-          prefs = await SharedPreferences.getInstance();
-        } catch (e) {
-          AppLogger.error('SharedPreferences setup attempt ${retryCount + 1} failed: $e', tag: 'FirebaseService');
-          retryCount++;
-          if (retryCount < maxRetries) {
-            await Future.delayed(Duration(milliseconds: 500 * retryCount));
-          }
-        }
-      }
-
-      if (prefs != null) {
-        await prefs.setString('family_id', familyId);
-        await prefs.setString('family_code', connectionCode);
-        await prefs.setString('elderly_name', elderlyName);
-      }
+      // Save locally using storage manager
+      await _storage.setString('family_id', familyId);
+      await _storage.setString('family_code', connectionCode);
+      await _storage.setString('elderly_name', elderlyName);
 
       _familyId = familyId;
       _familyCode = connectionCode;
@@ -286,53 +181,16 @@ class FirebaseService {
     }
   }
 
-  // Verify family code exists (for family members)
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
-    try {
-      // FIXED: Use connection code lookup instead of direct family access during setup
-      AppLogger.info('Getting family info using connection code: $connectionCode', tag: 'FirebaseService');
-      
-      // First, resolve family ID from secure connection code lookup
-      final connectionDoc = await _firestore
-          .collection('connection_codes')
-          .doc(connectionCode)
-          .get();
-
-      if (!connectionDoc.exists) {
-        AppLogger.error('No connection code found: $connectionCode', tag: 'FirebaseService');
-        return null;
-      }
-
-      final connectionData = connectionDoc.data()!;
-      final familyId = connectionData['familyId'] as String;
-      
-      // Now get the family document (this will be allowed by rules during setup)
-      final doc = await _firestore.collection('families').doc(familyId).get();
-      
-      if (doc.exists) {
-        final data = doc.data()!;
-        data['familyId'] = doc.id; // Add document ID for reference
-        
-        // Update local storage if we don't have family ID
-        if (_familyId == null) {
-          _familyId = familyId;
-          try {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('family_id', familyId);
-          } catch (e) {
-            AppLogger.warning('Failed to save family ID locally: $e', tag: 'FirebaseService');
-          }
-        }
-        
-        return data;
-      } else {
-        AppLogger.error('Family document does not exist for ID: $familyId', tag: 'FirebaseService');
-        return null;
-      }
-    } catch (e) {
-      AppLogger.error('Failed to get family info: $e', tag: 'FirebaseService');
-      return null;
+    final data = await _familyData.getFamilyInfo(connectionCode);
+    
+    // Update local storage if we don't have family ID
+    if (data != null && _familyId == null) {
+      _familyId = data['familyId'] as String;
+      await _storage.setString('family_id', _familyId!);
     }
+    
+    return data;
   }
 
   // Save meal record with simplified approach
@@ -348,16 +206,10 @@ class FirebaseService {
       
       AppLogger.info('Meal recording with familyId: $_familyId, familyCode: $_familyCode', tag: 'FirebaseService');
 
-      // Check authentication status before proceeding
-      if (_auth.currentUser == null) {
-        AppLogger.info('No authenticated user, attempting to re-authenticate', tag: 'FirebaseService');
-        try {
-          await _auth.signInAnonymously();
-          AppLogger.info('Re-authentication successful', tag: 'FirebaseService');
-        } catch (authError) {
-          AppLogger.error('Re-authentication failed: $authError', tag: 'FirebaseService');
-          return false;
-        }
+      // Ensure authentication
+      if (!await _authManager.ensureAuthenticated()) {
+        AppLogger.error('Authentication failed', tag: 'FirebaseService');
+        return false;
       }
 
       // CRITICAL FIX: Force immediate activity update before meal recording
@@ -465,52 +317,12 @@ class FirebaseService {
     }
   }
 
-  // CRITICAL: Method for child app to resolve family ID from connection code
   Future<String?> getFamilyIdFromConnectionCode(String connectionCode) async {
-    try {
-      // Use secure connection code lookup
-      final connectionDoc = await _firestore
-          .collection('connection_codes')
-          .doc(connectionCode)
-          .get();
-
-      if (connectionDoc.exists) {
-        final data = connectionDoc.data()!;
-        return data['familyId'] as String;
-      }
-      return null;
-    } catch (e) {
-      AppLogger.error('Failed to resolve family ID from connection code: $e', tag: 'FirebaseService');
-      return null;
-    }
+    return await _familyData.getFamilyIdFromConnectionCode(connectionCode);
   }
 
-  // Enhanced method for child app to get family data with proper ID resolution
-  Future<Map<String, dynamic>?> getFamilyDataForChild(
-    String connectionCode,
-  ) async {
-    try {
-      // First resolve the family ID
-      final familyId = await getFamilyIdFromConnectionCode(connectionCode);
-      if (familyId == null) return null;
-
-      // Get the family document
-      final familyDoc = await _firestore
-          .collection('families')
-          .doc(familyId)
-          .get();
-
-      if (familyDoc.exists) {
-        final data = familyDoc.data()!;
-        data['familyId'] = familyId; // Include resolved family ID
-        return data;
-      }
-
-      return null;
-    } catch (e) {
-      AppLogger.error('Failed to get family data for child: $e', tag: 'FirebaseService');
-      return null;
-    }
+  Future<Map<String, dynamic>?> getFamilyDataForChild(String connectionCode) async {
+    return await _familyData.getFamilyDataForChild(connectionCode);
   }
 
   // Child app method to get meals for a specific date
@@ -551,28 +363,17 @@ class FirebaseService {
     required String familyContact,
     int? alertHours,
   }) async {
-    try {
-      if (_familyId == null) {
-        AppLogger.warning('Cannot update family settings: no family ID', tag: 'FirebaseService');
-        return false;
-      }
-
-      AppLogger.info('Updating family settings for ID: $_familyId', tag: 'FirebaseService');
-      AppLogger.info('Settings: survivalSignal=$survivalSignalEnabled, alertHours=${alertHours ?? 12}', tag: 'FirebaseService');
-
-      // Update individual fields instead of replacing the entire settings object
-      await _firestore.collection('families').doc(_familyId).update({
-        'settings.survivalSignalEnabled': survivalSignalEnabled,
-        'settings.familyContact': familyContact,
-        'settings.alertHours': alertHours ?? 12,
-      });
-
-      AppLogger.info('Family settings updated successfully', tag: 'FirebaseService');
-      return true;
-    } catch (e) {
-      AppLogger.error('Failed to update family settings: $e', tag: 'FirebaseService');
+    if (_familyId == null) {
+      AppLogger.warning('Cannot update family settings: no family ID', tag: 'FirebaseService');
       return false;
     }
+
+    return await _familyData.updateFamilySettings(
+      _familyId!,
+      survivalSignalEnabled: survivalSignalEnabled,
+      familyContact: familyContact,
+      alertHours: alertHours,
+    );
   }
 
   // Delete family code from Firebase
@@ -591,10 +392,9 @@ class FirebaseService {
 
         // Clear local storage if this was our code
         if (_familyCode == connectionCode) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.remove('family_id');
-          await prefs.remove('family_code');
-          await prefs.remove('elderly_name');
+          await _storage.remove('family_id');
+          await _storage.remove('family_code');
+          await _storage.remove('elderly_name');
           _familyId = null;
           _familyCode = null;
           _elderlyName = null;
@@ -610,80 +410,20 @@ class FirebaseService {
     }
   }
 
-  // Listen for approval status changes
-  Stream<bool?> listenForApproval(String connectionCode) async* {
-    AppLogger.info('Setting up Firebase listener for connection code: $connectionCode', tag: 'FirebaseService');
-
-    // FIXED: Use connection code lookup instead of local family ID
-    try {
-      // First, resolve family ID from secure connection code lookup
-      final connectionDoc = await _firestore
-          .collection('connection_codes')
-          .doc(connectionCode)
-          .get();
-
-      if (!connectionDoc.exists) {
-        AppLogger.error('No connection code found: $connectionCode', tag: 'FirebaseService');
-        yield null;
-        return;
-      }
-
-      final connectionData = connectionDoc.data()!;
-      final familyId = connectionData['familyId'] as String;
-      
-      AppLogger.info('Listening for approval on family ID: $familyId', tag: 'FirebaseService');
-
-      // Listen to the family document (this will be allowed by rules during setup)
-      await for (final snapshot
-          in _firestore
-              .collection('families')
-              .doc(familyId)
-              .snapshots(includeMetadataChanges: true)) {
-        AppLogger.debug('Firebase snapshot received for family ID $familyId: exists=${snapshot.exists}, fromCache=${snapshot.metadata.isFromCache}', tag: 'FirebaseService');
-
-        if (snapshot.exists) {
-          final data = snapshot.data();
-          final approved = data?['approved'] as bool?;
-          AppLogger.info('Approval status in Firebase: $approved', tag: 'FirebaseService');
-          yield approved;
-        } else {
-          AppLogger.warning('Family document does not exist', tag: 'FirebaseService');
-          yield null;
-        }
-      }
-    } catch (e) {
-      AppLogger.error('Error in approval listener: $e', tag: 'FirebaseService');
-      yield null;
-    }
+  Stream<bool?> listenForApproval(String connectionCode) {
+    return _familyData.listenForApproval(connectionCode);
   }
 
-  // Set approval status (for child app)
   Future<bool> setApprovalStatus(String connectionCode, bool approved) async {
-    try {
-      // Get family ID from secure connection code lookup
-      final familyId = await getFamilyIdFromConnectionCode(connectionCode);
-      if (familyId == null) {
-        AppLogger.warning('No family found with connection code: $connectionCode', tag: 'FirebaseService');
-        return false;
-      }
-
-      // Add current user as family member when approving
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
-        AppLogger.error('User not authenticated', tag: 'FirebaseService');
-        return false;
-      }
-
-      await _firestore.collection('families').doc(familyId).update({
-        'approved': approved,
-        'approvedAt': FieldValue.serverTimestamp(),
-        'memberIds': FieldValue.arrayUnion([currentUser.uid]),
-      });
-      return true;
-    } catch (e) {
-      AppLogger.error('Failed to set approval status: $e', tag: 'FirebaseService');
+    await _authManager.ensureAuthenticated();
+    final userId = _authManager.currentUserId;
+    
+    if (userId == null) {
+      AppLogger.error('User not authenticated', tag: 'FirebaseService');
       return false;
     }
+
+    return await _familyData.setApprovalStatus(connectionCode, approved, userId);
   }
 
   // Force immediate activity update (for survival signal activation)
@@ -700,7 +440,7 @@ class FirebaseService {
         'updateTimestamp': FieldValue.serverTimestamp(),
       });
       
-      _lastActivityBatch = DateTime.now();
+      _activityBatcher.recordBatch();
       AppLogger.info('Forced activity update sent to Firebase', tag: 'FirebaseService');
       return true;
     } catch (e) {
@@ -849,68 +589,37 @@ class FirebaseService {
     }
   }
 
-  // Update general phone activity with smart batching (87% write reduction)
   Future<bool> updatePhoneActivity({bool forceImmediate = false}) async {
     try {
       if (_familyId == null) {
-        AppLogger.error('CRITICAL: Cannot update phone activity - familyId: $_familyId, familyCode: $_familyCode', tag: 'FirebaseService');
+        AppLogger.error('CRITICAL: Cannot update phone activity - familyId: $_familyId', tag: 'FirebaseService');
         return false;
       }
       
       AppLogger.info('Activity update - familyId: $_familyId, forceImmediate: $forceImmediate', tag: 'FirebaseService');
       
-      final now = DateTime.now();
-      _lastScreenActivity = now;
-      
-      // CRITICAL FIX: Always send immediately if this is the very first activity update
-      final isFirstActivity = _lastActivityBatch == null;
-      
-      // Check if we should batch this update (unless forced or first activity)
-      if (!forceImmediate && !isFirstActivity && _shouldBatchActivityUpdate(now)) {
-        AppLogger.debug('Batching activity update - not sending to Firebase yet', tag: 'FirebaseService');
-        return true; // Activity recorded locally, will be sent later
+      // Check if we should batch this update
+      if (_activityBatcher.shouldBatchUpdate(forceImmediate: forceImmediate)) {
+        AppLogger.debug('Batching activity update', tag: 'FirebaseService');
+        return true;
       }
       
-      // Send update to Firebase (immediate for first activity or when batching interval reached)
+      // Send update to Firebase
       await _firestore.collection('families').doc(_familyId).update({
         'lastPhoneActivity': FieldValue.serverTimestamp(),
-        'lastActivityType': isFirstActivity ? 'first_activity' : 'batched_activity',
+        'lastActivityType': _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity',
         'updateTimestamp': FieldValue.serverTimestamp(),
       });
       
-      _lastActivityBatch = now;
-      AppLogger.info('Activity update sent to Firebase (forced: $forceImmediate, first: $isFirstActivity)', tag: 'FirebaseService');
+      _activityBatcher.recordBatch();
+      AppLogger.info('Activity update sent to Firebase', tag: 'FirebaseService');
       return true;
     } catch (e) {
       AppLogger.error('Failed to update phone activity: $e', tag: 'FirebaseService');
       return false;
     }
   }
-  
-  // Determine if activity update should be batched or sent immediately
-  bool _shouldBatchActivityUpdate(DateTime currentTime) {
-    // Always send immediately if this is the first activity
-    if (_lastActivityBatch == null) {
-      return false;
-    }
-    
-    // Send immediately if breaking long inactivity (8+ hours)
-    final timeSinceLastBatch = currentTime.difference(_lastActivityBatch!);
-    if (timeSinceLastBatch >= _longInactivityThreshold) {
-      AppLogger.info('Breaking long inactivity - sending immediate update', tag: 'FirebaseService');
-      return false;
-    }
-    
-    // Send immediately if it's been more than 2 hours since last batch
-    if (timeSinceLastBatch >= _activityBatchInterval) {
-      return false;
-    }
-    
-    // Otherwise, batch the update
-    return true;
-  }
 
-  // Update location with smart throttling (90% write reduction)
   Future<bool> updateLocation({
     required double latitude,
     required double longitude,
@@ -923,10 +632,10 @@ class FirebaseService {
         return false;
       }
       
-      // Check if this location update should be throttled
-      if (!forceUpdate && _shouldThrottleLocationUpdate(latitude, longitude)) {
-        AppLogger.debug('Location update throttled - insufficient change', tag: 'FirebaseService');
-        return true; // Location recorded locally, but not sent to Firebase
+      // Check if location update should be throttled
+      if (!forceUpdate && _locationThrottler.shouldThrottleUpdate(latitude, longitude)) {
+        AppLogger.debug('Location update throttled', tag: 'FirebaseService');
+        return true;
       }
 
       await _firestore.collection('families').doc(_familyId).update({
@@ -938,11 +647,7 @@ class FirebaseService {
         },
       });
       
-      // Update throttling state
-      _lastStoredLatitude = latitude;
-      _lastStoredLongitude = longitude;
-      _lastLocationUpdate = DateTime.now();
-
+      _locationThrottler.recordUpdate(latitude, longitude);
       AppLogger.info('Location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
       return true;
     } catch (e) {
@@ -950,96 +655,18 @@ class FirebaseService {
       return false;
     }
   }
-  
-  // Determine if location update should be throttled
-  bool _shouldThrottleLocationUpdate(double latitude, double longitude) {
-    // Always send the first location update
-    if (_lastStoredLatitude == null || _lastStoredLongitude == null) {
-      return false;
-    }
-    
-    // Calculate distance from last stored location
-    final distanceKm = _calculateDistanceKm(
-      _lastStoredLatitude!, _lastStoredLongitude!,
-      latitude, longitude,
-    );
-    
-    // Send update if distance exceeds threshold
-    if (distanceKm >= _significantDistanceKm) {
-      AppLogger.debug('Significant location change: ${distanceKm.toStringAsFixed(2)}km', tag: 'FirebaseService');
-      return false;
-    }
-    
-    // CRITICAL FIX: Reduce time threshold to prevent location issues during meal recording
-    final now = DateTime.now();
-    if (_lastLocationUpdate != null) {
-      final hoursSinceUpdate = now.difference(_lastLocationUpdate!).inHours;
-      // Reduced from 24 hours to 4 hours for better tracking
-      if (hoursSinceUpdate >= 4) {
-        AppLogger.debug('4-hour location update (${hoursSinceUpdate}h since last)', tag: 'FirebaseService');
-        return false;
-      }
-    }
-    
-    // Otherwise, throttle the update
-    return true;
-  }
-  
-  // Calculate distance between two GPS coordinates in kilometers
-  double _calculateDistanceKm(double lat1, double lon1, double lat2, double lon2) {
-    // Simple approximation for short distances
-    const double earthRadiusKm = 6371.0;
-    
-    final double deltaLat = _toRadians(lat2 - lat1);
-    final double deltaLon = _toRadians(lon2 - lon1);
-    
-    final double a = 
-        sin(deltaLat / 2) * sin(deltaLat / 2) +
-        cos(_toRadians(lat1)) * cos(_toRadians(lat2)) *
-        sin(deltaLon / 2) * sin(deltaLon / 2);
-    
-    final double c = 2 * asin(sqrt(a));
-    
-    return earthRadiusKm * c;
-  }
-  
-  // Convert degrees to radians
-  double _toRadians(double degrees) {
-    return degrees * (3.14159265359 / 180.0);
-  }
 
-  // Force immediate location update (bypass throttling)
   Future<bool> forceLocationUpdate({
     required double latitude,
     required double longitude,
     String? address,
   }) async {
-    try {
-      if (_familyId == null) {
-        AppLogger.warning('Cannot force location update: no family ID', tag: 'FirebaseService');
-        return false;
-      }
-
-      await _firestore.collection('families').doc(_familyId).update({
-        'location': {
-          'latitude': latitude,
-          'longitude': longitude,
-          'timestamp': FieldValue.serverTimestamp(),
-          'address': address ?? '',
-        },
-      });
-      
-      // Update throttling state
-      _lastStoredLatitude = latitude;
-      _lastStoredLongitude = longitude;
-      _lastLocationUpdate = DateTime.now();
-
-      AppLogger.info('Location forcibly updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
-      return true;
-    } catch (e) {
-      AppLogger.error('Failed to force location update: $e', tag: 'FirebaseService');
-      return false;
-    }
+    return await updateLocation(
+      latitude: latitude,
+      longitude: longitude,
+      address: address,
+      forceUpdate: true,
+    );
   }
 
   // Update alert settings in Firebase for Functions to use
@@ -1444,18 +1071,16 @@ class FirebaseService {
     }
   }
 
-  // Restore local data after successful recovery
   Future<void> _restoreLocalData({
     required String familyId,
     required String connectionCode,
     required String elderlyName,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('family_id', familyId);
-      await prefs.setString('family_code', connectionCode);
-      await prefs.setString('elderly_name', elderlyName);
-      await prefs.setBool('setup_complete', true);
+      await _storage.setString('family_id', familyId);
+      await _storage.setString('family_code', connectionCode);
+      await _storage.setString('elderly_name', elderlyName);
+      await _storage.setBool('setup_complete', true);
       
       // Update instance variables
       _familyId = familyId;
@@ -1471,16 +1096,9 @@ class FirebaseService {
 
   // Recovery code display removed - using name + connection code only
 
-  // Check if user has existing account data (for recovery prompts)
   Future<bool> hasExistingAccountData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final hasConnectionCode = prefs.getString('family_code') != null;
-      return hasConnectionCode;
-    } catch (e) {
-      AppLogger.error('Failed to check existing account data: $e', tag: 'FirebaseService');
-      return false;
-    }
+    final familyCode = await _storage.getString('family_code');
+    return familyCode != null;
   }
 
   // Getters

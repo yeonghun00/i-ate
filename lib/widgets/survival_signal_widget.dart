@@ -1,9 +1,10 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
+import 'package:thanks_everyday/services/storage/local_storage_manager.dart';
+import 'package:thanks_everyday/widgets/survival_signal/activity_data_listener.dart';
+import 'package:thanks_everyday/widgets/survival_signal/activity_status_calculator.dart';
+import 'package:thanks_everyday/widgets/survival_signal/activity_status_display.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 
 class SurvivalSignalWidget extends StatefulWidget {
@@ -15,110 +16,40 @@ class SurvivalSignalWidget extends StatefulWidget {
 
 class _SurvivalSignalWidgetState extends State<SurvivalSignalWidget> {
   final FirebaseService _firebaseService = FirebaseService();
+  final LocalStorageManager _storage = LocalStorageManager();
+  late final ActivityDataListener _activityListener;
   bool _survivalSignalEnabled = false;
   int _alertThresholdHours = 12;
-  int _hoursSinceActivity = 0;
-  DateTime? _lastPhoneActivity;
-  bool _isLoading = true;
-  Timer? _updateTimer;
 
   @override
   void initState() {
     super.initState();
+    _activityListener = ActivityDataListener(_firebaseService);
     _loadSettings();
-    _setupFirebaseListener();
-    _startUpdateTimer();
   }
   
   @override
   void dispose() {
-    _updateTimer?.cancel();
+    _activityListener.dispose();
     super.dispose();
   }
 
   Future<void> _loadSettings() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final newSurvivalEnabled = prefs.getBool('flutter.survival_signal_enabled') ?? false;
-      final newAlertHours = prefs.getInt('alert_hours') ?? 12;
+      final survivalEnabled = await _storage.getString('flutter.survival_signal_enabled');
+      final alertHours = await _storage.getString('alert_hours');
       
       setState(() {
-        _survivalSignalEnabled = newSurvivalEnabled;
-        _alertThresholdHours = newAlertHours;
+        _survivalSignalEnabled = survivalEnabled == 'true';
+        _alertThresholdHours = int.tryParse(alertHours ?? '12') ?? 12;
       });
-      
-      // Recalculate hours since activity with new threshold
-      if (_lastPhoneActivity != null) {
-        final now = DateTime.now();
-        final hoursSince = now.difference(_lastPhoneActivity!).inHours;
-        setState(() {
-          _hoursSinceActivity = hoursSince;
-        });
-      }
     } catch (e) {
       AppLogger.error('Failed to load survival signal settings: $e', tag: 'SurvivalSignalWidget');
     }
   }
 
-  void _startUpdateTimer() {
-    // Update the hours calculation every minute to keep colors current
-    _updateTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      if (_lastPhoneActivity != null && mounted) {
-        final now = DateTime.now();
-        final hoursSince = now.difference(_lastPhoneActivity!).inHours;
-        
-        if (hoursSince != _hoursSinceActivity) {
-          setState(() {
-            _hoursSinceActivity = hoursSince;
-          });
-        }
-      }
-    });
-  }
-
-  void _setupFirebaseListener() {
-    if (!_firebaseService.isSetup) return;
-
-    try {
-      FirebaseFirestore.instance
-          .collection('families')
-          .doc(_firebaseService.familyId)
-          .snapshots()
-          .listen((snapshot) {
-        if (snapshot.exists && mounted) {
-          final data = snapshot.data();
-          final lastPhoneActivityTimestamp = data?['lastPhoneActivity'] as Timestamp?;
-          
-          if (lastPhoneActivityTimestamp != null) {
-            final lastActivity = lastPhoneActivityTimestamp.toDate();
-            final now = DateTime.now();
-            final hoursSince = now.difference(lastActivity).inHours;
-            
-            setState(() {
-              _lastPhoneActivity = lastActivity;
-              _hoursSinceActivity = hoursSince;
-              _isLoading = false;
-            });
-          } else {
-            setState(() {
-              _lastPhoneActivity = null;
-              _hoursSinceActivity = 999; // Indicate no data
-              _isLoading = false;
-            });
-          }
-        }
-      });
-    } catch (e) {
-      AppLogger.error('Failed to setup Firebase listener for survival signal: $e', tag: 'SurvivalSignalWidget');
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Don't show widget if survival signal is disabled
     if (!_survivalSignalEnabled) {
       return const SizedBox.shrink();
     }
@@ -134,55 +65,98 @@ class _SurvivalSignalWidgetState extends State<SurvivalSignalWidget> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
-          Row(
-            children: [
-              Icon(
-                Icons.health_and_safety,
-                size: 20,
-                color: AppTheme.primaryGreen,
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                '안전 신호',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              if (_isLoading)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGreen),
-                  ),
-                )
-              else
-                _buildStatusIndicator(),
-            ],
-          ),
-          
+          _buildHeader(),
           const SizedBox(height: 12),
-          
-          // Status details
-          if (!_isLoading) ...[
-            _buildStatusDetails(),
-            const SizedBox(height: 8),
-            _buildLastActivityInfo(),
-          ],
+          _buildContent(),
         ],
       ),
     );
   }
 
-  Widget _buildStatusIndicator() {
-    final color = _lastPhoneActivity != null 
-        ? AppTheme.getSurvivalSignalColor(_hoursSinceActivity, _alertThresholdHours)
-        : AppTheme.survivalAlert;
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        const Icon(
+          Icons.health_and_safety,
+          size: 20,
+          color: AppTheme.primaryGreen,
+        ),
+        const SizedBox(width: 8),
+        const Text(
+          '안전 신호',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const Spacer(),
+        StreamBuilder<ActivityData>(
+          stream: _activityListener.activityStream,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData || snapshot.data!.isLoading) {
+              return const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGreen),
+                ),
+              );
+            }
+            
+            return _buildStatusIndicator(snapshot.data!);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContent() {
+    return StreamBuilder<ActivityData>(
+      stream: _activityListener.activityStream,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.isLoading) {
+          return const SizedBox.shrink();
+        }
+
+        final data = snapshot.data!;
+        final status = ActivityStatusCalculator.calculateStatus(
+          lastActivity: data.lastActivity,
+          alertThresholdHours: _alertThresholdHours,
+        );
+
+        return ActivityStatusDisplay(
+          status: status,
+          hoursSinceActivity: data.hoursSinceActivity,
+          alertThresholdHours: _alertThresholdHours,
+          lastActivity: data.lastActivity,
+        );
+      },
+    );
+  }
+
+  Widget _buildStatusIndicator(ActivityData data) {
+    final status = ActivityStatusCalculator.calculateStatus(
+      lastActivity: data.lastActivity,
+      alertThresholdHours: _alertThresholdHours,
+    );
+
+    Color color;
+    switch (status) {
+      case ActivityStatus.normal:
+        color = AppTheme.primaryGreen;
+        break;
+      case ActivityStatus.warning:
+        color = AppTheme.warningYellow;
+        break;
+      case ActivityStatus.alert:
+        color = AppTheme.errorRed;
+        break;
+      case ActivityStatus.noData:
+        color = AppTheme.textLight;
+        break;
+    }
     
     return Container(
       width: 12,
@@ -199,117 +173,5 @@ class _SurvivalSignalWidgetState extends State<SurvivalSignalWidget> {
         ],
       ),
     );
-  }
-
-  Widget _buildStatusDetails() {
-    if (_lastPhoneActivity == null) {
-      return const Row(
-        children: [
-          Icon(
-            Icons.help_outline,
-            size: 16,
-            color: AppTheme.textLight,
-          ),
-          SizedBox(width: 6),
-          Text(
-            '활동 데이터 없음',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.textLight,
-            ),
-          ),
-        ],
-      );
-    }
-
-    final statusColor = AppTheme.getSurvivalSignalColor(_hoursSinceActivity, _alertThresholdHours);
-    final statusText = AppTheme.getSurvivalSignalStatus(_hoursSinceActivity, _alertThresholdHours);
-    
-    IconData statusIcon;
-    if (_hoursSinceActivity >= _alertThresholdHours) {
-      statusIcon = Icons.warning;
-    } else if (_hoursSinceActivity >= (_alertThresholdHours - 1)) {
-      statusIcon = Icons.info_outline;
-    } else {
-      statusIcon = Icons.check_circle_outline;
-    }
-
-    return Row(
-      children: [
-        Icon(
-          statusIcon,
-          size: 16,
-          color: statusColor,
-        ),
-        const SizedBox(width: 6),
-        Text(
-          statusText,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: statusColor,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          '($_hoursSinceActivity시간 전)',
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.textLight,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLastActivityInfo() {
-    if (_lastPhoneActivity == null) {
-      return Text(
-        '알림 기준: $_alertThresholdHours시간',
-        style: const TextStyle(
-          fontSize: 12,
-          color: AppTheme.textLight,
-        ),
-      );
-    }
-
-    final timeString = _formatTime(_lastPhoneActivity!);
-    final warningTime = _alertThresholdHours - 1;
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '마지막 활동: $timeString',
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.textLight,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '주의: $warningTime시간 • 알림: $_alertThresholdHours시간',
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.textLight,
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-    
-    if (difference.inDays > 0) {
-      return '${difference.inDays}일 전';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours}시간 전';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}분 전';
-    } else {
-      return '방금 전';
-    }
   }
 }

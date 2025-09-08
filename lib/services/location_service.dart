@@ -1,9 +1,11 @@
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
+import 'package:thanks_everyday/services/storage/local_storage_manager.dart';
+import 'package:thanks_everyday/services/location/location_throttler.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 
@@ -13,7 +15,8 @@ class LocationService {
   static const MethodChannel _channel = MethodChannel('com.thousandemfla.thanks_everyday/screen_monitor');
   
   static final FirebaseService _firebaseService = FirebaseService();
-  // _locationTimer removed - location updates now handled via native code
+  static final LocalStorageManager _storage = LocalStorageManager();
+  static final LocationThrottler _locationThrottler = LocationThrottler();
   static Position? _lastKnownPosition;
   
   // Initialize location service
@@ -37,14 +40,14 @@ class LocationService {
     AppLogger.info('Location service initialized', tag: 'LocationService');
   }
   
-  // Check if location tracking is enabled
   static Future<bool> isLocationTrackingEnabled() async {
+    // CRITICAL FIX: Use LocalStorageManager's setBool for consistency with native Android
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_locationEnabledKey) ?? false;
   }
   
-  // Enable/disable location tracking
   static Future<void> setLocationTrackingEnabled(bool enabled) async {
+    // CRITICAL FIX: Use native boolean storage for consistency with Android
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_locationEnabledKey, enabled);
     
@@ -140,7 +143,13 @@ class LocationService {
       );
       
       _lastKnownPosition = position;
-      await _updateLocationInFirebase(position);
+      
+      // Update Firebase through the unified location update flow
+      await _firebaseService.updateLocation(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        address: '', // Could be enhanced with geocoding in the future
+      );
       
       return position;
     } catch (e) {
@@ -174,20 +183,6 @@ class LocationService {
     }
   }
   
-  // Update location in Firebase
-  static Future<void> _updateLocationInFirebase(Position position) async {
-    try {
-      await _firebaseService.updateLocation(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        address: '', // Could be enhanced with geocoding in the future
-      );
-      
-      AppLogger.info('Location updated in Firebase: ${position.latitude}, ${position.longitude}', tag: 'LocationService');
-    } catch (e) {
-      AppLogger.error('Failed to update location in Firebase: $e', tag: 'LocationService');
-    }
-  }
   
   // Get last known location
   static Position? getLastKnownLocation() {
@@ -204,6 +199,13 @@ class LocationService {
       
       AppLogger.debug('Native location update: $latitude, $longitude (accuracy: ${accuracy}m)', tag: 'LocationService');
       
+      // CRITICAL FIX: Check if location update should be throttled
+      // For 2-minute GPS requirement, we should allow most updates but prevent spam
+      if (_locationThrottler.shouldThrottleUpdate(latitude, longitude)) {
+        AppLogger.debug('Native location update throttled - not significant enough change', tag: 'LocationService');
+        return;
+      }
+      
       // Create Position object
       _lastKnownPosition = Position(
         latitude: latitude,
@@ -218,8 +220,18 @@ class LocationService {
         headingAccuracy: 0.0,
       );
       
-      // Update Firebase
-      await _updateLocationInFirebase(_lastKnownPosition!);
+      // Update Firebase using FirebaseService with forceUpdate to bypass its throttling
+      // (since we've already done throttling here)
+      await _firebaseService.forceLocationUpdate(
+        latitude: latitude,
+        longitude: longitude,
+        address: '', // Could be enhanced with geocoding in the future
+      );
+      
+      // Record the throttle update
+      _locationThrottler.recordUpdate(latitude, longitude);
+      
+      AppLogger.info('Native location updated in Firebase: $latitude, $longitude', tag: 'LocationService');
       
     } catch (e) {
       AppLogger.error('Failed to handle native location update: $e', tag: 'LocationService');
@@ -256,12 +268,12 @@ class LocationService {
     );
   }
   
-  /// Test location service debugging
+  /// Test location service debugging - ENHANCED AFTER REFACTOR FIX
   static Future<void> testLocationUpdate() async {
-    AppLogger.debug('TESTING LOCATION SERVICE', tag: 'LocationService');
+    AppLogger.debug('TESTING LOCATION SERVICE - POST REFACTOR FIX', tag: 'LocationService');
     
     try {
-      // Check if location is enabled
+      // Check if location is enabled (using fixed boolean method)
       final isEnabled = await isLocationTrackingEnabled();
       AppLogger.debug('Location tracking enabled: $isEnabled', tag: 'LocationService');
       
@@ -269,13 +281,31 @@ class LocationService {
       final hasPermission = await checkLocationPermission();
       AppLogger.debug('Has location permission: $hasPermission', tag: 'LocationService');
       
+      // Check background permission specifically
+      final hasBackgroundPermission = await hasBackgroundLocationPermission();
+      AppLogger.debug('Has background location permission: $hasBackgroundPermission', tag: 'LocationService');
+      
       // Try to get current location manually
       AppLogger.debug('Attempting to get current location...', tag: 'LocationService');
       final position = await getCurrentLocation();
       if (position != null) {
         AppLogger.debug('Got location: ${position.latitude}, ${position.longitude}', tag: 'LocationService');
+        
+        // Test throttling logic
+        final shouldThrottle = _locationThrottler.shouldThrottleUpdate(position.latitude, position.longitude);
+        AppLogger.debug('Location throttle check: ${shouldThrottle ? "WOULD THROTTLE" : "WOULD ALLOW"}', tag: 'LocationService');
+        
       } else {
         AppLogger.error('Failed to get location', tag: 'LocationService');
+      }
+      
+      // Test native channel communication
+      AppLogger.debug('Testing native location channel communication...', tag: 'LocationService');
+      try {
+        await _channel.invokeMethod('checkLocationPermissions');
+        AppLogger.debug('Native channel communication: SUCCESS', tag: 'LocationService');
+      } catch (e) {
+        AppLogger.error('Native channel communication failed: $e', tag: 'LocationService');
       }
       
     } catch (e) {
