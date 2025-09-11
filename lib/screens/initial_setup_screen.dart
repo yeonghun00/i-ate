@@ -7,6 +7,7 @@ import 'package:thanks_everyday/screens/guide_screen.dart';
 // DataRecoveryScreen removed - using name + connection code only
 import 'package:thanks_everyday/screens/account_recovery_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
+import 'package:thanks_everyday/models/sleep_time_settings.dart';
 import 'dart:async';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 
@@ -31,6 +32,8 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   int _alertHours = 12; // Default 12 hours
   bool _useCustomAlertHours = false;
   bool _locationTrackingEnabled = false;
+  bool _sleepTimeExclusionEnabled = false;
+  SleepTimeSettings _sleepTimeSettings = SleepTimeSettings.defaultSettings();
   bool _isWaitingForApproval = false;
   int _remainingSeconds = 120; // 2 minutes countdown
   StreamSubscription? _approvalSubscription;
@@ -57,12 +60,14 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       );
 
       if (generatedCode != null) {
-        // Update Firebase settings with correct alert hours
+        // Update Firebase settings with correct alert hours and sleep settings
         AppLogger.info('Saving alert hours to Firebase: $_alertHours', tag: 'InitialSetupScreen');
+        final sleepSettings = _sleepTimeExclusionEnabled ? _sleepTimeSettings.toMap() : null;
         final settingsUpdated = await _firebaseService.updateFamilySettings(
           survivalSignalEnabled: _survivalSignalEnabled,
           familyContact: '',
           alertHours: _alertHours,
+          sleepTimeSettings: sleepSettings,
         );
         
         if (!settingsUpdated) {
@@ -79,6 +84,20 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           'flutter.location_tracking_enabled',
           _locationTrackingEnabled,
         );
+        
+        // Save sleep time exclusion settings
+        await prefs.setBool(
+          'flutter.sleep_exclusion_enabled',
+          _sleepTimeExclusionEnabled,
+        );
+        if (_sleepTimeExclusionEnabled) {
+          final sleepSettingsMap = _sleepTimeSettings.toMap();
+          await prefs.setInt('flutter.sleep_start_hour', sleepSettingsMap['sleepStartHour']);
+          await prefs.setInt('flutter.sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
+          await prefs.setInt('flutter.sleep_end_hour', sleepSettingsMap['sleepEndHour']);
+          await prefs.setInt('flutter.sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
+          await prefs.setString('flutter.sleep_active_days', sleepSettingsMap['activeDays'].join(','));
+        }
         // Note: alert_hours is now stored in Firebase only
 
         // Family data is now stored directly in Firebase - no temporary storage needed
@@ -353,6 +372,8 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       _survivalSignalEnabled = false;
       _alertHours = 12;
       _locationTrackingEnabled = false;
+      _sleepTimeExclusionEnabled = false;
+      _sleepTimeSettings = SleepTimeSettings.defaultSettings();
       _isWaitingForApproval = false;
     });
   }
@@ -972,6 +993,30 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                 ),
                               ),
                             ],
+
+                            const SizedBox(height: 15),
+
+                            // Sleep time exclusion toggle (only show when survival signal is enabled)
+                            if (_survivalSignalEnabled) ...[
+                              _buildToggleOption(
+                                title: '수면 시간 제외',
+                                subtitle: '잠자는 시간은 모니터링하지 않음',
+                                value: _sleepTimeExclusionEnabled,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _sleepTimeExclusionEnabled = value;
+                                    if (value) {
+                                      _sleepTimeSettings = _sleepTimeSettings.copyWith(enabled: true);
+                                    }
+                                  });
+                                },
+                              ),
+
+                              if (_sleepTimeExclusionEnabled) ...[
+                                const SizedBox(height: 15),
+                                _buildSleepTimeSelector(),
+                              ],
+                            ],
                           ],
                         ),
                       ),
@@ -1111,6 +1156,237 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildSleepTimeSelector() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.schedule_outlined, size: 20, color: AppTheme.primaryGreen),
+              const SizedBox(width: 8),
+              const Text(
+                '수면 시간 설정',
+                style: TextStyle(
+                  fontSize: 16.0,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Sleep start and end time
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '잠자는 시간',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.textMedium,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => _selectTime(true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _sleepTimeSettings.sleepStart.format(context),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            const Icon(Icons.access_time, size: 20, color: AppTheme.textLight),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '일어나는 시간',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.textMedium,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => _selectTime(false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _sleepTimeSettings.sleepEnd.format(context),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            const Icon(Icons.access_time, size: 20, color: AppTheme.textLight),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Active days
+          const Text(
+            '활성 요일',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppTheme.textMedium,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              ...[1, 2, 3, 4, 5, 6, 7].asMap().entries.map((entry) {
+                final day = entry.value;
+                final dayNames = ['월', '화', '수', '목', '금', '토', '일'];
+                final isSelected = _sleepTimeSettings.activeDays.contains(day);
+                
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => _toggleActiveDay(day),
+                    child: Container(
+                      margin: EdgeInsets.only(right: entry.key < 6 ? 4 : 0),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppTheme.primaryGreen : Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isSelected ? AppTheme.primaryGreen : const Color(0xFFD1D5DB),
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          dayNames[day - 1],
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: isSelected ? Colors.white : AppTheme.textLight,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Description
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryGreen.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '설정된 수면 시간에는 안전 확인 알림이 일시 중지됩니다.',
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textMedium,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleActiveDay(int day) {
+    setState(() {
+      final currentDays = List<int>.from(_sleepTimeSettings.activeDays);
+      if (currentDays.contains(day)) {
+        currentDays.remove(day);
+      } else {
+        currentDays.add(day);
+      }
+      currentDays.sort();
+      _sleepTimeSettings = _sleepTimeSettings.copyWith(activeDays: currentDays);
+    });
+  }
+
+  Future<void> _selectTime(bool isStartTime) async {
+    final initialTime = isStartTime 
+        ? _sleepTimeSettings.sleepStart 
+        : _sleepTimeSettings.sleepEnd;
+        
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: AppTheme.primaryGreen,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        if (isStartTime) {
+          _sleepTimeSettings = _sleepTimeSettings.copyWith(sleepStart: picked);
+        } else {
+          _sleepTimeSettings = _sleepTimeSettings.copyWith(sleepEnd: picked);
+        }
+      });
+    }
   }
 
   Widget _buildToggleOption({

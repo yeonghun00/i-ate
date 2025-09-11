@@ -8,6 +8,7 @@ import 'package:thanks_everyday/services/food_tracking_service.dart';
 import 'package:thanks_everyday/services/permission_manager_service.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 import 'package:thanks_everyday/widgets/permission_guide_widget.dart';
+import 'package:thanks_everyday/models/sleep_time_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onDataDeleted;
@@ -37,6 +38,10 @@ class _SettingsScreenState extends State<SettingsScreen>
   bool _locationTrackingEnabled = false;
   int _foodAlertHours = 8;
   PermissionStatusInfo? _permissionStatus;
+  
+  // Sleep time settings
+  bool _sleepTimeExclusionEnabled = false;
+  SleepTimeSettings _sleepTimeSettings = SleepTimeSettings.defaultSettings();
 
   @override
   void initState() {
@@ -131,6 +136,22 @@ class _SettingsScreenState extends State<SettingsScreen>
         _locationTrackingEnabled = actualLocationEnabled;
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
         _permissionStatus = permissionStatus;
+        
+        // Load sleep time settings
+        _sleepTimeExclusionEnabled = prefs.getBool('flutter.sleep_exclusion_enabled') ?? false;
+        final sleepStartHour = prefs.getInt('flutter.sleep_start_hour') ?? 22;
+        final sleepStartMinute = prefs.getInt('flutter.sleep_start_minute') ?? 0;
+        final sleepEndHour = prefs.getInt('flutter.sleep_end_hour') ?? 6;
+        final sleepEndMinute = prefs.getInt('flutter.sleep_end_minute') ?? 0;
+        final activeDaysString = prefs.getString('flutter.sleep_active_days') ?? '1,2,3,4,5,6,7';
+        final activeDays = activeDaysString.split(',').map((e) => int.parse(e.trim())).toList();
+        
+        _sleepTimeSettings = SleepTimeSettings(
+          enabled: _sleepTimeExclusionEnabled,
+          sleepStart: TimeOfDay(hour: sleepStartHour, minute: sleepStartMinute),
+          sleepEnd: TimeOfDay(hour: sleepEndHour, minute: sleepEndMinute),
+          activeDays: activeDays,
+        );
       });
     } catch (e) {
       AppLogger.error('Failed to load settings: $e', tag: 'SettingsScreen');
@@ -222,6 +243,15 @@ class _SettingsScreenState extends State<SettingsScreen>
         'flutter.survival_signal_enabled',
         _survivalSignalEnabled,
       );
+      
+      // Save sleep time settings locally
+      await prefs.setBool('flutter.sleep_exclusion_enabled', _sleepTimeExclusionEnabled);
+      await prefs.setInt('flutter.sleep_start_hour', _sleepTimeSettings.sleepStart.hour);
+      await prefs.setInt('flutter.sleep_start_minute', _sleepTimeSettings.sleepStart.minute);
+      await prefs.setInt('flutter.sleep_end_hour', _sleepTimeSettings.sleepEnd.hour);
+      await prefs.setInt('flutter.sleep_end_minute', _sleepTimeSettings.sleepEnd.minute);
+      await prefs.setString('flutter.sleep_active_days', _sleepTimeSettings.activeDays.join(','));
+      
       AppLogger.info('Local settings updated successfully (alert hours stored in Firebase only)', tag: 'SettingsScreen');
 
       // Update screen monitoring service
@@ -246,6 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             survivalSignalEnabled: _survivalSignalEnabled,
             familyContact: _familyContact ?? '',
             alertHours: _alertHours,
+            sleepTimeSettings: _sleepTimeExclusionEnabled ? _sleepTimeSettings.toMap() : null,
           );
 
           if (success) {
@@ -380,6 +411,16 @@ class _SettingsScreenState extends State<SettingsScreen>
                   if (_survivalSignalEnabled) ...[
                     const SizedBox(height: 16),
                     _buildAlertHoursSelector(),
+                  ],
+
+                  // Sleep time exclusion setting (only show when survival signal is enabled)
+                  if (_survivalSignalEnabled) ...[
+                    const SizedBox(height: 16),
+                    _buildSleepTimeToggle(),
+                    if (_sleepTimeExclusionEnabled) ...[
+                      const SizedBox(height: 12),
+                      _buildSleepTimeSelector(),
+                    ],
                   ],
 
                   const SizedBox(height: 16),
@@ -635,6 +676,255 @@ class _SettingsScreenState extends State<SettingsScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildSleepTimeToggle() {
+    return _buildToggleItem(
+      icon: Icons.bedtime,
+      title: '수면 시간 제외',
+      subtitle: '잠자는 시간은 모니터링하지 않음',
+      value: _sleepTimeExclusionEnabled,
+      onChanged: (value) {
+        setState(() {
+          _sleepTimeExclusionEnabled = value;
+          _sleepTimeSettings = _sleepTimeSettings.copyWith(enabled: value);
+        });
+        Future.delayed(const Duration(milliseconds: 300), () {
+          _updateSettings();
+        });
+      },
+    );
+  }
+
+  Widget _buildSleepTimeSelector() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.schedule_outlined, size: 20, color: const Color(0xFF10B981)),
+              const SizedBox(width: 8),
+              const Text(
+                '수면 시간 설정',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF374151),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Sleep start and end time
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '잠자는 시간',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => _selectTime(true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _sleepTimeSettings.sleepStart.format(context),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF374151),
+                              ),
+                            ),
+                            const Icon(Icons.access_time, size: 20, color: Color(0xFF6B7280)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '일어나는 시간',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => _selectTime(false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _sleepTimeSettings.sleepEnd.format(context),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF374151),
+                              ),
+                            ),
+                            const Icon(Icons.access_time, size: 20, color: Color(0xFF6B7280)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Active days
+          const Text(
+            '활성 요일',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              ...[1, 2, 3, 4, 5, 6, 7].asMap().entries.map((entry) {
+                final day = entry.value;
+                final dayNames = ['월', '화', '수', '목', '금', '토', '일'];
+                final isSelected = _sleepTimeSettings.activeDays.contains(day);
+                
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => _toggleActiveDay(day),
+                    child: Container(
+                      margin: EdgeInsets.only(right: entry.key < 6 ? 4 : 0),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFF10B981) : Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isSelected ? const Color(0xFF10B981) : const Color(0xFFD1D5DB),
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          dayNames[day - 1],
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: isSelected ? Colors.white : const Color(0xFF6B7280),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Description
+          Text(
+            '설정된 수면 시간에는 안전 확인 알림이 일시 중지됩니다.',
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF6B7280),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectTime(bool isStart) async {
+    final currentTime = isStart ? _sleepTimeSettings.sleepStart : _sleepTimeSettings.sleepEnd;
+    
+    final TimeOfDay? selectedTime = await showTimePicker(
+      context: context,
+      initialTime: currentTime,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: const Color(0xFF10B981),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (selectedTime != null) {
+      setState(() {
+        if (isStart) {
+          _sleepTimeSettings = _sleepTimeSettings.copyWith(sleepStart: selectedTime);
+        } else {
+          _sleepTimeSettings = _sleepTimeSettings.copyWith(sleepEnd: selectedTime);
+        }
+      });
+      
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _updateSettings();
+      });
+    }
+  }
+
+  void _toggleActiveDay(int day) {
+    setState(() {
+      final currentDays = List<int>.from(_sleepTimeSettings.activeDays);
+      if (currentDays.contains(day)) {
+        currentDays.remove(day);
+      } else {
+        currentDays.add(day);
+      }
+      currentDays.sort();
+      _sleepTimeSettings = _sleepTimeSettings.copyWith(activeDays: currentDays);
+    });
+    
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _updateSettings();
+    });
   }
 
   Widget _buildAlertHoursSelector() {
@@ -1072,6 +1362,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
         ],
+        
       ],
     );
   }
@@ -1179,6 +1470,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       ),
     );
   }
+
 
   void _showPermissionGuide() {
     showDialog(

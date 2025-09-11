@@ -362,6 +362,7 @@ class FirebaseService {
     required bool survivalSignalEnabled,
     required String familyContact,
     int? alertHours,
+    Map<String, dynamic>? sleepTimeSettings,
   }) async {
     if (_familyId == null) {
       AppLogger.warning('Cannot update family settings: no family ID', tag: 'FirebaseService');
@@ -373,6 +374,7 @@ class FirebaseService {
       survivalSignalEnabled: survivalSignalEnabled,
       familyContact: familyContact,
       alertHours: alertHours,
+      sleepTimeSettings: sleepTimeSettings,
     );
   }
 

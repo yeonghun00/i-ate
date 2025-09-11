@@ -82,15 +82,24 @@ class FamilyDataManager {
     required bool survivalSignalEnabled,
     required String familyContact,
     int? alertHours,
+    Map<String, dynamic>? sleepTimeSettings,
   }) async {
     try {
       AppLogger.info('Updating family settings for ID: $familyId', tag: 'FamilyDataManager');
-
-      await _firestore.collection('families').doc(familyId).update({
+      
+      final updateData = <String, dynamic>{
         'settings.survivalSignalEnabled': survivalSignalEnabled,
         'settings.familyContact': familyContact,
         'settings.alertHours': alertHours ?? 12,
-      });
+      };
+      
+      // Add sleep settings if provided
+      if (sleepTimeSettings != null) {
+        updateData['settings.sleepTimeSettings'] = sleepTimeSettings;
+        AppLogger.info('Including sleep time settings in update', tag: 'FamilyDataManager');
+      }
+
+      await _firestore.collection('families').doc(familyId).update(updateData);
 
       AppLogger.info('Family settings updated successfully', tag: 'FamilyDataManager');
       return true;

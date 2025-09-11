@@ -420,6 +420,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 Log.e(TAG, "❌ Force restart failed: ${e.message}")
             }
         }
+        
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -505,6 +506,15 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 return
             }
             
+            // Check if it's currently sleep time
+            if (isCurrentlySleepTime(context)) {
+                Log.d(TAG, "😴 Currently in sleep period - skipping survival signal check")
+                // Still record execution and schedule next alarm, but don't update Firebase
+                recordAlarmExecution(context, "survival")
+                scheduleSurvivalAlarm(context)
+                return
+            }
+            
             // Check screen state and update Firebase
             checkScreenStateAndUpdateFirebase(context)
             
@@ -568,28 +578,40 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                     "longitude" to location.longitude,
                     "accuracy" to location.accuracy,
                     "timestamp" to FieldValue.serverTimestamp(),
-                    "provider" to (location.provider ?: "unknown")
+                    "provider" to (location.provider ?: "unknown"),
+                    "address" to "" // Keep existing address field
                 )
                 
                 db.collection("families").document(familyId)
                     .update(mapOf("location" to locationData))
                     .addOnSuccessListener {
-                        Log.d(TAG, "✅ GPS location updated in Firebase")
+                        Log.i(TAG, "✅ GPS location updated in Firebase: ${location.latitude}, ${location.longitude}")
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "❌ Failed to update GPS location: ${e.message}")
+                        Log.e(TAG, "❌ Failed to update GPS location in Firebase: ${e.message}")
                     }
             } else {
-                // CRITICAL FIX: Still update Firebase even without location
-                Log.w(TAG, "⚠️ No location available - updating timestamp to show GPS is running")
+                // ENHANCED: Don't update Firebase with null coordinates - preserve existing location
+                Log.e(TAG, "❌ No location available - GPS is NOT working properly!")
+                Log.e(TAG, "📍 This means:")
+                Log.e(TAG, "  1. Check location permissions (especially 'Always Allow')")
+                Log.e(TAG, "  2. Enable GPS in phone settings")
+                Log.e(TAG, "  3. Check if location providers are working")
+                Log.e(TAG, "  4. Try opening Google Maps to refresh GPS")
+                
+                // Update lastGpsCheck to show the service is trying, but don't overwrite location with nulls
+                val gpsDebugData = mapOf(
+                    "lastGpsCheck" to FieldValue.serverTimestamp(),
+                    "gpsStatus" to "location_unavailable"
+                )
                 
                 db.collection("families").document(familyId)
-                    .update("lastGpsCheck", FieldValue.serverTimestamp())
+                    .update(gpsDebugData)
                     .addOnSuccessListener {
-                        Log.d(TAG, "✅ GPS timestamp updated (no location available)")
+                        Log.w(TAG, "⚠️ GPS debug timestamp updated (location still unavailable)")
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "❌ Failed to update GPS timestamp: ${e.message}")
+                        Log.e(TAG, "❌ Failed to update GPS debug timestamp: ${e.message}")
                     }
             }
         } catch (e: Exception) {
@@ -628,40 +650,210 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
     }
     
     /**
-     * Get current location from LocationManager
+     * Check if current time falls within sleep period
+     */
+    private fun isCurrentlySleepTime(context: Context): Boolean {
+        try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            
+            // Check if sleep exclusion is enabled
+            val sleepEnabled = prefs.getBoolean("flutter.sleep_exclusion_enabled", false)
+            if (!sleepEnabled) {
+                Log.d(TAG, "😴 Sleep exclusion disabled")
+                return false
+            }
+            
+            // Get sleep settings
+            val sleepStartHour = prefs.getInt("flutter.sleep_start_hour", 22)
+            val sleepStartMinute = prefs.getInt("flutter.sleep_start_minute", 0)
+            val sleepEndHour = prefs.getInt("flutter.sleep_end_hour", 6)
+            val sleepEndMinute = prefs.getInt("flutter.sleep_end_minute", 0)
+            
+            // Get active days (default to all days if not set)
+            val activeDaysString = prefs.getString("flutter.sleep_active_days", "1,2,3,4,5,6,7")
+            val activeDays = activeDaysString?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: listOf(1,2,3,4,5,6,7)
+            
+            val now = java.util.Calendar.getInstance()
+            val currentHour = now.get(java.util.Calendar.HOUR_OF_DAY)
+            val currentMinute = now.get(java.util.Calendar.MINUTE)
+            val currentWeekday = now.get(java.util.Calendar.DAY_OF_WEEK)
+            
+            // Convert to Monday=1, Sunday=7 format (Calendar uses Sunday=1)
+            val mondayBasedWeekday = if (currentWeekday == java.util.Calendar.SUNDAY) 7 else currentWeekday - 1
+            
+            // Check if today is an active day
+            if (!activeDays.contains(mondayBasedWeekday)) {
+                Log.d(TAG, "😴 Today ($mondayBasedWeekday) is not an active sleep day")
+                return false
+            }
+            
+            val currentTimeMinutes = currentHour * 60 + currentMinute
+            val sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute
+            val sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute
+            
+            val isSleepTime = if (sleepStartMinutes > sleepEndMinutes) {
+                // Overnight period (e.g., 22:00 - 06:00)
+                currentTimeMinutes >= sleepStartMinutes || currentTimeMinutes <= sleepEndMinutes
+            } else {
+                // Same-day period (e.g., 14:00 - 16:00)
+                currentTimeMinutes >= sleepStartMinutes && currentTimeMinutes <= sleepEndMinutes
+            }
+            
+            Log.d(TAG, "😴 Sleep time check: ${String.format("%02d:%02d", currentHour, currentMinute)} is ${if (isSleepTime) "SLEEP" else "AWAKE"} " +
+                    "(${String.format("%02d:%02d", sleepStartHour, sleepStartMinute)}-${String.format("%02d:%02d", sleepEndHour, sleepEndMinute)})")
+            
+            return isSleepTime
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error checking sleep time: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * Get current location from LocationManager with enhanced error handling and fresh location request
      */
     private fun getCurrentLocation(context: Context): Location? {
         try {
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
             
-            // Check permissions
-            val hasPermission = ActivityCompat.checkSelfPermission(
+            // ENHANCED: Check all required permissions including background location
+            val hasFineLocation = ActivityCompat.checkSelfPermission(
                 context, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED ||
-            ActivityCompat.checkSelfPermission(
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            val hasCoarseLocation = ActivityCompat.checkSelfPermission(
                 context, Manifest.permission.ACCESS_COARSE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
             
-            if (!hasPermission) {
-                Log.w(TAG, "⚠️ No location permissions")
+            val hasBackgroundLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ActivityCompat.checkSelfPermission(
+                    context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true // Not required for API < 29
+            }
+            
+            Log.d(TAG, "🔍 GPS Permission Status:")
+            Log.d(TAG, "  - Fine Location: $hasFineLocation")
+            Log.d(TAG, "  - Coarse Location: $hasCoarseLocation")
+            Log.d(TAG, "  - Background Location: $hasBackgroundLocation")
+            
+            if (!hasFineLocation && !hasCoarseLocation) {
+                Log.w(TAG, "❌ No basic location permissions granted")
                 return null
             }
             
-            // Try GPS first, then network
-            var location: Location? = null
-            
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            if (!hasBackgroundLocation) {
+                Log.w(TAG, "⚠️ Background location permission missing - GPS may not work when app is closed")
             }
             
-            if (location == null && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            // ENHANCED: Check provider status with detailed logging
+            val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val isNetworkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            val isPassiveEnabled = locationManager.isProviderEnabled(LocationManager.PASSIVE_PROVIDER)
+            
+            Log.d(TAG, "🛰️ Location Provider Status:")
+            Log.d(TAG, "  - GPS Provider: $isGpsEnabled")
+            Log.d(TAG, "  - Network Provider: $isNetworkEnabled")
+            Log.d(TAG, "  - Passive Provider: $isPassiveEnabled")
+            
+            if (!isGpsEnabled && !isNetworkEnabled) {
+                Log.e(TAG, "❌ No location providers are enabled")
+                return null
             }
             
-            return location
+            // ENHANCED: Try multiple location sources with timestamps
+            var bestLocation: Location? = null
+            var locationSource = "none"
+            
+            // Try GPS first (most accurate)
+            if (isGpsEnabled) {
+                try {
+                    val gpsLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    if (gpsLocation != null) {
+                        val ageMinutes = (System.currentTimeMillis() - gpsLocation.time) / 60000
+                        Log.d(TAG, "📍 GPS Location found: ${gpsLocation.latitude}, ${gpsLocation.longitude} (${ageMinutes}min old)")
+                        if (ageMinutes < 30) { // Use GPS if less than 30 minutes old
+                            bestLocation = gpsLocation
+                            locationSource = "GPS"
+                        } else {
+                            Log.w(TAG, "⚠️ GPS location too old: ${ageMinutes} minutes")
+                        }
+                    } else {
+                        Log.w(TAG, "⚠️ GPS location is null")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error getting GPS location: ${e.message}")
+                }
+            }
+            
+            // Try Network provider if GPS failed or is too old
+            if (bestLocation == null && isNetworkEnabled) {
+                try {
+                    val networkLocation = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    if (networkLocation != null) {
+                        val ageMinutes = (System.currentTimeMillis() - networkLocation.time) / 60000
+                        Log.d(TAG, "📡 Network Location found: ${networkLocation.latitude}, ${networkLocation.longitude} (${ageMinutes}min old)")
+                        if (ageMinutes < 60) { // Use Network if less than 60 minutes old
+                            bestLocation = networkLocation
+                            locationSource = "Network"
+                        } else {
+                            Log.w(TAG, "⚠️ Network location too old: ${ageMinutes} minutes")
+                        }
+                    } else {
+                        Log.w(TAG, "⚠️ Network location is null")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error getting Network location: ${e.message}")
+                }
+            }
+            
+            // Try Passive provider as last resort
+            if (bestLocation == null && isPassiveEnabled) {
+                try {
+                    val passiveLocation = locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+                    if (passiveLocation != null) {
+                        val ageMinutes = (System.currentTimeMillis() - passiveLocation.time) / 60000
+                        Log.d(TAG, "📱 Passive Location found: ${passiveLocation.latitude}, ${passiveLocation.longitude} (${ageMinutes}min old)")
+                        if (ageMinutes < 120) { // Use Passive if less than 2 hours old
+                            bestLocation = passiveLocation
+                            locationSource = "Passive"
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error getting Passive location: ${e.message}")
+                }
+            }
+            
+            if (bestLocation != null) {
+                Log.i(TAG, "✅ Using location from $locationSource: ${bestLocation.latitude}, ${bestLocation.longitude} (accuracy: ${bestLocation.accuracy}m)")
+            } else {
+                Log.e(TAG, "❌ No valid location found from any provider")
+                
+                // ENHANCED: Log detailed failure analysis
+                Log.e(TAG, "🔍 Location Failure Analysis:")
+                Log.e(TAG, "  - GPS Enabled: $isGpsEnabled")
+                Log.e(TAG, "  - Network Enabled: $isNetworkEnabled")
+                Log.e(TAG, "  - Fine Permission: $hasFineLocation")
+                Log.e(TAG, "  - Background Permission: $hasBackgroundLocation")
+                
+                // Check if location services are globally disabled
+                try {
+                    val locationMode = android.provider.Settings.Secure.getInt(
+                        context.contentResolver,
+                        android.provider.Settings.Secure.LOCATION_MODE
+                    )
+                    Log.e(TAG, "  - System Location Mode: $locationMode (0=off, 1=battery_saving, 2=sensors_only, 3=high_accuracy)")
+                } catch (e: Exception) {
+                    Log.e(TAG, "  - Could not check system location mode: ${e.message}")
+                }
+            }
+            
+            return bestLocation
             
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error getting location: ${e.message}")
+            Log.e(TAG, "❌ Critical error in getCurrentLocation: ${e.message}", e)
             return null
         }
     }

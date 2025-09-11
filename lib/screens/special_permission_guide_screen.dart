@@ -188,6 +188,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       await _checkPermissions();
     } catch (e) {
       AppLogger.error('Error requesting permissions: $e', tag: 'SpecialPermissionGuideScreen');
+      _showMessage('권한 요청 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
   }
 
@@ -226,10 +227,8 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       
       if (_backgroundLocationGranted) {
         AppLogger.info('SUCCESS: Background location permission GRANTED - "Always allow" was selected!', tag: 'SpecialPermissionGuideScreen');
-        _showMessage('✅ 위치 권한이 설정되었습니다! GPS 추적이 활성화됩니다.');
       } else {
         AppLogger.warning('Background location permission DENIED - user selected "While using app" or denied', tag: 'SpecialPermissionGuideScreen');
-        _showMessage('⚠️ "항상 허용"을 선택해야 GPS 추적이 제대로 작동합니다.');
       }
       
     } catch (e) {
@@ -305,14 +304,25 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
       const platform = MethodChannel('com.thousandemfla.thanks_everyday/miui');
       final bool success = await platform.invokeMethod('requestAutoStartPermission');
       
-      if (success) {
-        _showMessage('설정 화면이 열렸습니다. 자동 시작 권한을 활성화해주세요.');
-      } else {
+      if (!success) {
+        AppLogger.warning('Could not open autostart settings', tag: 'SpecialPermissionGuideScreen');
         _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
       }
     } catch (e) {
       AppLogger.error('Error opening autostart settings: $e', tag: 'SpecialPermissionGuideScreen');
       _showMessage('설정 화면을 열 수 없습니다. 수동으로 보안 앱에서 설정해주세요.');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -326,11 +336,6 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
         !_hasUsagePermission || !_hasBatteryPermission || 
         (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
       AppLogger.warning('Not all permissions granted - cannot complete setup', tag: 'SpecialPermissionGuideScreen');
-      if (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged) {
-        _showMessage('MIUI 자동 시작 권한 안내를 확인해주세요.');
-      } else {
-        _showMessage('모든 권한이 필요합니다. 권한을 확인해주세요.');
-      }
       return;
     }
     
@@ -370,16 +375,6 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     }
   }
 
-  void _showMessage(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

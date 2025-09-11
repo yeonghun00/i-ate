@@ -312,4 +312,5 @@ class LocationService {
       AppLogger.error('Location test failed: $e', tag: 'LocationService');
     }
   }
+
 }
