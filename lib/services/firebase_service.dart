@@ -47,15 +47,22 @@ class FirebaseService {
   Future<String> _generateConnectionCode() async {
     String code;
     bool isUnique = false;
+    int attempts = 0;
+    const maxAttempts = 100; // Failsafe to prevent infinite loop
 
     do {
       code = FamilyIdGenerator.generateConnectionCode();
-      final query = await _firestore
-          .collection('families')
-          .where('connectionCode', isEqualTo: code)
-          .limit(1)
-          .get();
-      isUnique = query.docs.isEmpty;
+
+      // Check the PUBLIC connection_codes collection, not the private families collection
+      final docRef = _firestore.collection('connection_codes').doc(code);
+      final docSnapshot = await docRef.get();
+
+      isUnique = !docSnapshot.exists;
+      attempts++;
+
+      if (attempts >= maxAttempts && !isUnique) {
+        throw Exception('Failed to generate unique connection code after $maxAttempts attempts');
+      }
     } while (!isUnique);
 
     return code;
@@ -88,20 +95,26 @@ class FirebaseService {
     String familyId;
     bool isUnique = false;
     int attempts = 0;
-    const maxAttempts = 5;
-    
+    const maxAttempts = 100; // Increased attempts for better reliability
+
     do {
       familyId = FamilyIdGenerator.generateFamilyId();
-      
-      final docSnapshot = await _firestore.collection('families').doc(familyId).get();
-      isUnique = !docSnapshot.exists;
-      
+
+      // Use connection_codes collection to check family ID uniqueness
+      // Since we create the connection_codes document first, we can check if familyId already exists there
+      final query = await _firestore
+          .collection('connection_codes')
+          .where('familyId', isEqualTo: familyId)
+          .limit(1)
+          .get();
+      isUnique = query.docs.isEmpty;
+
       attempts++;
       if (attempts >= maxAttempts && !isUnique) {
         throw Exception('Failed to generate unique family ID after $maxAttempts attempts');
       }
     } while (!isUnique);
-    
+
     return familyId;
   }
 
@@ -124,9 +137,13 @@ class FirebaseService {
       AppLogger.info('Creating family document with user ID: $currentUserId', tag: 'FirebaseService');
 
       // Create connection code lookup document for secure family joining
-      await _firestore.collection('connection_codes').doc(connectionCode).set({
+      // IMPORTANT: Using .add() instead of .doc() to generate random document ID
+      // Child app expects 'code' as a FIELD, not document ID
+      await _firestore.collection('connection_codes').add({
+        'code': connectionCode,        // Child app queries by this field
         'familyId': familyId,
         'elderlyName': elderlyName,
+        'isActive': true,              // Required by child app, set to false after first use
         'createdAt': FieldValue.serverTimestamp(),
       });
 

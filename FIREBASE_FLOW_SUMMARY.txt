@@ -1,0 +1,317 @@
+================================================================================
+THANKS EVERYDAY - COMPLETE FIREBASE FIRESTORE DATA FLOW ANALYSIS
+================================================================================
+
+PROJECT: Thanks Everyday (식사하셨어요? / 고마워요)
+ANALYSIS DATE: 2025-10-18
+PURPOSE: Parent-focused elderly health monitoring app with child app integration
+
+================================================================================
+KEY FINDINGS SUMMARY
+================================================================================
+
+COLLECTION STRUCTURE:
+  connection_codes/
+    └── {4-digit-code} [Public lookup for child app joining]
+  
+  families/
+    └── {familyId}
+        ├── [Root document with all status & settings]
+        └── meals/
+            └── {YYYY-MM-DD} [Daily meal records]
+
+PRIMARY USE CASES:
+  1. Setup Complete ("설정 완료" button)
+     - Creates 2 Firestore documents
+     - Waits for child app approval (2-minute timeout)
+     - Deletes if timeout
+  
+  2. Record Meal
+     - 3-step Firebase process:
+       a) Force activity update (BEFORE meal)
+       b) Save meal to meals subcollection
+       c) Force GPS location update (AFTER meal)
+  
+  3. GPS Location Tracking
+     - Native Android service sends updates
+     - LocationThrottler prevents spam
+     - Updates families/{id}/location
+  
+  4. Survival Signal
+     - Continuous activity monitoring
+     - ActivityBatcher batches updates (2-hour interval)
+     - Child app calculates hours since activity
+  
+  5. Child App Join
+     - Read connection_codes/{code}
+     - Child app approves connection
+     - Parent app listens via real-time stream
+
+================================================================================
+FIRESTORE OPERATIONS BREAKDOWN
+================================================================================
+
+CREATE (.set()) - 3 locations:
+  [1] connection_codes/{code} @ firebase_service.dart:140
+  [2] families/{id} @ firebase_service.dart:147
+  [3] families/{id}/meals/{date} @ firebase_service.dart:249-258
+
+UPDATE (.update()) - 7 patterns:
+  [1] settings @ family_data_manager.dart:102
+  [2] lastMeal @ firebase_service.dart:273-279
+  [3] lastPhoneActivity @ firebase_service.dart:623-627
+  [4] location @ firebase_service.dart:656-663
+  [5] alerts.survival @ firebase_service.dart:477
+  [6] alerts.food @ firebase_service.dart:537-539
+  [7] approved (from child) @ family_data_manager.dart:120-124
+
+READ (.get()) - 6 locations:
+  [1] connection_codes/{code} verify @ firebase_service.dart:57-58
+  [2] connection_codes query @ firebase_service.dart:105-109
+  [3] families/{id}/meals/{date} count @ firebase_service.dart:261-266
+  [4] families/{id}/meals/{date} load @ home_page.dart:72
+  [5] connection_codes/{code} child join @ family_data_manager.dart:14-17
+  [6] families/{id} full data @ family_data_manager.dart:27
+
+LISTEN (.snapshots()) - 2 real-time streams:
+  [1] families/{id} for approval @ family_data_manager.dart:151
+  [2] families/{id}/recordings for new uploads @ child_app_service.dart:112-117
+
+DELETE (.delete()) - 1 location:
+  [1] families/{id} on timeout @ firebase_service.dart:406
+
+================================================================================
+CRITICAL FIELD NAMES & STRUCTURES
+================================================================================
+
+families/{familyId} Document:
+  - familyId: String (unique identifier)
+  - connectionCode: String (4-digit lookup code)
+  - elderlyName: String (e.g., "김할머니")
+  - settings: Object
+    - survivalSignalEnabled: Boolean (default: false)
+    - alertHours: Number (default: 12)
+    - sleepTimeSettings: Object (optional)
+  - alerts: Object
+    - survival: Timestamp | null
+    - food: Timestamp | null
+  - lastMeal: Object
+    - timestamp: Timestamp
+    - count: Number (0-3)
+    - number: Number (1, 2, or 3)
+  - location: Object
+    - latitude: Number
+    - longitude: Number
+    - timestamp: Timestamp
+    - address: String
+  - lastPhoneActivity: Timestamp (used for survival signal)
+  - lastActivityType: String ("first_activity" | "batched_activity")
+  - approved: Boolean | null (null=pending, true=approved, false=rejected)
+  - memberIds: Array[String] (family members)
+
+connection_codes/{code} Document:
+  - familyId: String (foreign key to families)
+  - elderlyName: String
+  - createdAt: Timestamp
+
+families/{familyId}/meals/{YYYY-MM-DD} Document:
+  - meals: Array[Object]
+    - mealId: String (unique per meal)
+    - timestamp: String (ISO8601)
+    - mealNumber: Number (1, 2, or 3)
+    - elderlyName: String
+    - createdAt: String (ISO8601)
+  - date: String (YYYY-MM-DD)
+  - elderlyName: String
+
+================================================================================
+EXACT USER ACTION FLOWS
+================================================================================
+
+ACTION 1: "설정 완료" (Setup Complete Button)
+─────────────────────────────────────────────
+User Input: Elderly name (e.g., "김할머니"), settings
+Firebase Operations:
+  1. READ: connection_codes/{random} check uniqueness
+  2. READ QUERY: connection_codes where familyId check uniqueness
+  3. CREATE: connection_codes/{code} with familyId + elderlyName + timestamp
+  4. CREATE: families/{familyId} with all settings/defaults
+  5. UPDATE: families/{familyId} with final settings
+  6. LISTEN: families/{familyId}.snapshots() watch "approved" field
+  7. IF 2-min timeout: DELETE families/{familyId}
+Outcome: Generate 4-digit code, wait for child app approval
+
+ACTION 2: Record Meal ("식사했어요" Button)
+─────────────────────────────────────────────
+User Input: None (just click button)
+Firebase Operations:
+  BEFORE:
+    1. UPDATE: families/{familyId} lastPhoneActivity timestamp
+  RECORD:
+    2. SET (merge): families/{familyId}/meals/{today} add to meals array
+    3. READ: families/{familyId}/meals/{today}.get() get new count
+    4. UPDATE: families/{familyId} lastMeal with count/number
+    5. EXTERNAL: FCMv1Service send notification to child app
+  AFTER:
+    6. GET: LocationService.getCurrentLocation()
+    7. UPDATE: families/{familyId} location with GPS coords
+Outcome: Meal recorded, notification sent to child app
+
+ACTION 3: GPS Location Update
+──────────────────────────────
+Trigger: Native Android service detects location change
+Firebase Operations:
+  1. LocationThrottler check if distance significant
+  2. IF significant: UPDATE families/{familyId} location
+  3. EXTERNAL: Record throttle for next comparison
+Outcome: Location updated in real-time
+
+ACTION 4: Survival Signal / Activity Update
+────────────────────────────────────────────
+Triggers: App startup, meal recording, periodic (2-hr), force call
+Firebase Operations:
+  1. ActivityBatcher check if should batch:
+     - First activity → send immediately
+     - 8+ hours since last → send immediately
+     - 2+ hours since last → send immediately
+     - Otherwise → batch (don't send)
+  2. IF sending: UPDATE families/{familyId} lastPhoneActivity + type
+  3. IF batching: Store in memory only
+Child App Reads: lastPhoneActivity field, calculates hours since, triggers alert if > alertHours
+Outcome: Child app displays "활동 중", "위험", or alert based on age of timestamp
+
+ACTION 5: Child App Joins
+─────────────────────────
+User Input: Connection code "A2K4" entered in child app
+Firebase Operations:
+  1. READ: connection_codes/{A2K4}.get() → get familyId
+  2. READ: families/{familyId}.get() → get all elderly data
+  3. Child app displays: "김할머니" profile + meal count + location
+  4. Child user clicks "연결 승인" (Approve)
+  5. UPDATE: families/{familyId} approved = true, approvedAt, add to memberIds
+  6. LISTEN: Parent app's listener receives update
+  7. Parent app navigates to GuideScreen
+Outcome: Both apps now synced and monitoring active
+
+================================================================================
+THROTTLING & BATCHING BEHAVIOR
+================================================================================
+
+Activity Batching (ActivityBatcher):
+  - First activity: SEND immediately
+  - After 8+ hours of inactivity: SEND immediately
+  - After 2-hour batch interval: SEND immediately
+  - Between intervals: BATCH (don't send)
+  Logic: Reduces Firebase writes while ensuring timely alerts
+
+Location Throttling (LocationThrottler):
+  - Calculates distance from last known location
+  - If distance < threshold: SKIP update
+  - If distance >= threshold: SEND update
+  Logic: Prevents spam while tracking meaningful movement
+
+================================================================================
+KEY FILES & METHODS
+================================================================================
+
+Main Service:
+  lib/services/firebase_service.dart (1126 lines)
+    - setupFamilyCode()           [CREATE family + connection code]
+    - saveMealRecord()            [CREATE meal, UPDATE activity & location]
+    - updatePhoneActivity()       [UPDATE activity based on batching]
+    - updateLocation()            [UPDATE GPS location]
+    - forceActivityUpdate()        [Force immediate activity update]
+    - forceLocationUpdate()        [Force immediate GPS update]
+    - listenForApproval()         [LISTEN for child app approval]
+    - deleteFamilyCode()          [DELETE on timeout]
+
+Data Management:
+  lib/services/family/family_data_manager.dart
+    - getFamilyInfo()             [READ family by connection code]
+    - updateFamilySettings()      [UPDATE settings]
+    - setApprovalStatus()         [UPDATE approval status]
+    - listenForApproval()         [LISTEN for approval stream]
+
+Location Tracking:
+  lib/services/location_service.dart
+    - _handleLocationUpdate()     [Handle native location → UPDATE Firebase]
+
+Activity Batching:
+  lib/services/activity/activity_batcher.dart
+    - shouldBatchUpdate()         [Logic for batching vs immediate send]
+
+UI Screens:
+  lib/screens/initial_setup_screen.dart
+    - _setupFamily()              [Initiate setup flow]
+    - _startListeningForApproval()[LISTEN for approval]
+  
+  lib/screens/home_page.dart
+    - _recordMeal()               [Record meal + updates]
+    - _forceInitialUpdates()      [Force GPS + activity on startup]
+
+================================================================================
+REAL-TIME SYNC POINTS
+================================================================================
+
+Parent App → Firebase → Child App:
+  - saveMealRecord() → families/{id}/lastMeal → Child shows meal count
+  - updatePhoneActivity() → families/{id}/lastPhoneActivity → Child calculates alert
+  - updateLocation() → families/{id}/location → Child shows on map
+
+Parent App ← Firebase ← Child App:
+  - listenForApproval() ← families/{id}/approved ← Child app sets approval
+
+================================================================================
+SECURITY NOTES
+================================================================================
+
+Security Fields Used in Firestore Rules:
+  - createdBy: User ID of setup creator
+  - memberIds: Array of approved family members
+  - approved: Approval status
+  - connectionCode: Public lookup identifier
+
+Collection Access Patterns:
+  - connection_codes: Public read-only (lookup only, no write)
+  - families: Member-only read/write (via Firestore security rules)
+  - families/{id}/meals: Member-only read
+
+================================================================================
+STATISTICS
+================================================================================
+
+Total .set() operations:     3
+Total .update() operations:  7 patterns (multiple calls per pattern)
+Total .get() operations:     6
+Total .snapshots() streams:  2
+Total .delete() operations:  1
+Total Firestore collections: 2 root + 2 subcollections
+
+Typical Daily Firestore Writes per Device:
+  - Meal recording: 3-4 writes per day (3 meals + activity + location)
+  - Activity batching: 2-6 writes per day (2-hour intervals)
+  - Location updates: Varies (background service)
+  - Setup/Approval: 2 writes per setup cycle
+
+================================================================================
+DOCUMENT GENERATION
+================================================================================
+
+Two analysis documents created:
+
+1. COMPLETE_FIREBASE_DATA_FLOW.md (866 lines, 24KB)
+   - Detailed explanation of each user action
+   - Complete code snippets with line numbers
+   - Field names and data structures
+   - CREATE/UPDATE/READ/DELETE/LISTEN summary tables
+   - Security reference
+   - Key methods by file
+
+2. FIREBASE_DATA_FLOW_DIAGRAM.md (443 lines, 15KB)
+   - ASCII flow diagrams for all major flows
+   - Visual representation of data dependencies
+   - Operation summary by type
+   - Real-time sync points
+   - FCM notification flow
+
+================================================================================

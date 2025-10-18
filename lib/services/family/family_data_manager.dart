@@ -132,18 +132,20 @@ class FamilyDataManager {
 
   Stream<bool?> listenForApproval(String connectionCode) async* {
     try {
-      final connectionDoc = await _firestore
+      // Query by 'code' field (not document ID)
+      final connectionQuery = await _firestore
           .collection('connection_codes')
-          .doc(connectionCode)
+          .where('code', isEqualTo: connectionCode)
+          .limit(1)
           .get();
 
-      if (!connectionDoc.exists) {
+      if (connectionQuery.docs.isEmpty) {
         AppLogger.error('No connection code found: $connectionCode', tag: 'FamilyDataManager');
         yield null;
         return;
       }
 
-      final connectionData = connectionDoc.data()!;
+      final connectionData = connectionQuery.docs.first.data();
       final familyId = connectionData['familyId'] as String;
       
       AppLogger.info('Listening for approval on family ID: $familyId', tag: 'FamilyDataManager');
