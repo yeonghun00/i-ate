@@ -7,6 +7,7 @@ import 'package:thanks_everyday/services/family/family_id_generator.dart';
 import 'package:thanks_everyday/services/family/family_data_manager.dart';
 import 'package:thanks_everyday/services/location/location_throttler.dart';
 import 'package:thanks_everyday/services/activity/activity_batcher.dart';
+import 'package:thanks_everyday/services/encryption_service.dart';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
@@ -23,6 +24,7 @@ class FirebaseService {
   String? _familyId;
   String? _familyCode;
   String? _elderlyName;
+  String? _cachedEncryptionKey;
 
   Future<bool> initialize() async {
     try {
@@ -148,6 +150,7 @@ class FirebaseService {
       });
 
       // Create family document with unique ID
+      // NOTE: Encryption key is DERIVED from familyId, NOT stored in Firestore
       await _firestore.collection('families').doc(familyId).set({
         'familyId': familyId,
         'connectionCode': connectionCode,
@@ -174,10 +177,9 @@ class FirebaseService {
           'number': null
         },
         'location': {
-          'latitude': null,
-          'longitude': null,
+          'encrypted': null,
+          'iv': null,
           'timestamp': null,
-          'address': '',
         },
         'lastPhoneActivity': null, // Initialize field for phone activity tracking
       });
@@ -657,17 +659,27 @@ class FirebaseService {
         return true;
       }
 
+      // Get encryption key
+      final encryptionKey = await _getEncryptionKey();
+
+      // Encrypt location data
+      final encryptedData = EncryptionService.encryptLocation(
+        latitude: latitude,
+        longitude: longitude,
+        address: address ?? '',
+        base64Key: encryptionKey,
+      );
+
       await _firestore.collection('families').doc(_familyId).update({
         'location': {
-          'latitude': latitude,
-          'longitude': longitude,
+          'encrypted': encryptedData['encrypted'],
+          'iv': encryptedData['iv'],
           'timestamp': FieldValue.serverTimestamp(),
-          'address': address ?? '',
         },
       });
-      
+
       _locationThrottler.recordUpdate(latitude, longitude);
-      AppLogger.info('Location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
+      AppLogger.info('Encrypted location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
       return true;
     } catch (e) {
       AppLogger.error('Failed to update location: $e', tag: 'FirebaseService');
@@ -1125,6 +1137,28 @@ class FirebaseService {
   String? get familyCode => _familyCode;
   String? get elderlyName => _elderlyName;
   bool get isSetup => _familyCode != null && _familyId != null;
-  
+
   // Recovery code getter removed - using name + connection code only
+
+  // Helper method to get and cache encryption key
+  // SECURITY: Key is DERIVED from familyId, NOT fetched from Firestore
+  Future<String> _getEncryptionKey() async {
+    if (_cachedEncryptionKey != null) {
+      return _cachedEncryptionKey!;
+    }
+
+    if (_familyId == null) {
+      throw Exception('Cannot derive encryption key: no family ID');
+    }
+
+    try {
+      // Derive key from familyId (same key will be derived by child app)
+      _cachedEncryptionKey = EncryptionService.deriveEncryptionKey(_familyId!);
+      AppLogger.debug('Encryption key derived and cached from familyId', tag: 'FirebaseService');
+      return _cachedEncryptionKey!;
+    } catch (e) {
+      AppLogger.error('Failed to derive encryption key: $e', tag: 'FirebaseService');
+      rethrow;
+    }
+  }
 }
