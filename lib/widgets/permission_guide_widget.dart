@@ -339,10 +339,6 @@ class _PermissionGuideWidgetState extends State<PermissionGuideWidget> {
         icon = Icons.layers_rounded;
         iconColor = AppTheme.accentPurple;
         break;
-      case PermissionType.notifications:
-        icon = Icons.notifications_active;
-        iconColor = AppTheme.accentOrange;
-        break;
       default:
         icon = Icons.settings;
         iconColor = AppTheme.textLight;

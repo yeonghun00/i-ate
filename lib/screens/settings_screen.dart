@@ -1388,10 +1388,6 @@ class _SettingsScreenState extends State<SettingsScreen>
         icon = Icons.layers_rounded;
         iconColor = const Color(0xFF8B5CF6);
         break;
-      case PermissionType.notifications:
-        icon = Icons.notifications_active;
-        iconColor = const Color(0xFFF59E0B);
-        break;
       default:
         icon = Icons.settings;
         iconColor = const Color(0xFF6B7280);

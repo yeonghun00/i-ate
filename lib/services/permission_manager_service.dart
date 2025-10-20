@@ -11,7 +11,6 @@ enum PermissionType {
   batteryOptimization,
   usageStats,
   overlay,
-  notifications,
   autostart, // For MIUI/Xiaomi devices
 }
 
@@ -92,11 +91,7 @@ class PermissionManagerService {
       // Overlay permission
       final overlayPermission = await _checkOverlayPermission();
       permissions.add(overlayPermission);
-      
-      // Notification permission
-      final notificationPermission = await _checkNotificationPermission();
-      permissions.add(notificationPermission);
-      
+
       // Calculate status
       final missing = permissions.where((p) => p.isRequired && !p.isGranted).toList();
       final optional = permissions.where((p) => !p.isRequired).toList();
@@ -194,13 +189,13 @@ class PermissionManagerService {
   /// Check overlay permission
   static Future<PermissionInfo> _checkOverlayPermission() async {
     bool isGranted = false;
-    
+
     try {
       isGranted = await OverlayService.hasOverlayPermission();
     } catch (e) {
       AppLogger.error('Error checking overlay permission: $e', tag: _tag);
     }
-    
+
     return PermissionInfo(
       type: PermissionType.overlay,
       isGranted: isGranted,
@@ -211,29 +206,7 @@ class PermissionManagerService {
       actionText: '오버레이 권한 허용',
     );
   }
-  
-  /// Check notification permission
-  static Future<PermissionInfo> _checkNotificationPermission() async {
-    bool isGranted = false;
-    
-    try {
-      final status = await Permission.notification.status;
-      isGranted = status.isGranted;
-    } catch (e) {
-      AppLogger.error('Error checking notification permission: $e', tag: _tag);
-    }
-    
-    return PermissionInfo(
-      type: PermissionType.notifications,
-      isGranted: isGranted,
-      isRequired: true,
-      displayName: '알림 권한',
-      description: '중요한 앱 알림을 받기 위해 필요',
-      whyNeeded: '앱의 상태 변경이나 중요한 정보를 알림으로 받을 수 있습니다.',
-      actionText: '알림 권한 허용',
-    );
-  }
-  
+
   /// Request specific permission
   static Future<bool> requestPermission(PermissionType type) async {
     AppLogger.info('Requesting permission: $type', tag: _tag);
@@ -255,11 +228,7 @@ class PermissionManagerService {
           
         case PermissionType.overlay:
           return await OverlayService.requestOverlayPermission();
-          
-        case PermissionType.notifications:
-          final status = await Permission.notification.request();
-          return status.isGranted;
-          
+
         case PermissionType.autostart:
           // MIUI specific - handled separately
           return true;
@@ -315,7 +284,6 @@ class PermissionManagerService {
     try {
       switch (type) {
         case PermissionType.location:
-        case PermissionType.notifications:
         case PermissionType.overlay:
           await openAppSettings();
           break;
