@@ -1063,7 +1063,9 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
 
                       const SizedBox(height: 20),
 
-                      // Account recovery option
+                      // Account recovery option - HIDDEN but function preserved
+                      // Uncomment below to show "이미 계정이 있어요" button
+                      /*
                       TextButton(
                         onPressed: _navigateToAccountRecovery,
                         child: Container(
@@ -1097,6 +1099,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                           ),
                         ),
                       ),
+                      */
                     ],
                   ],
                 ),

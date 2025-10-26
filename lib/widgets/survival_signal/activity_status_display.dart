@@ -44,8 +44,8 @@ class ActivityStatusDisplay extends StatelessWidget {
 
     final statusColor = _getStatusColor();
     final statusText = ActivityStatusCalculator.getStatusText(
-      status, 
-      hoursSinceActivity, 
+      status,
+      hoursSinceActivity,
       alertThresholdHours,
     );
 
@@ -63,7 +63,7 @@ class ActivityStatusDisplay extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(
-          '(${hoursSinceActivity}시간 전)',
+          '($hoursSinceActivity시간 전)',
           style: const TextStyle(fontSize: 12, color: AppTheme.textLight),
         ),
       ],
@@ -73,14 +73,14 @@ class ActivityStatusDisplay extends StatelessWidget {
   Widget _buildActivityInfo() {
     if (status == ActivityStatus.noData) {
       return Text(
-        '알림 기준: ${alertThresholdHours}시간',
+        '알림 기준: $alertThresholdHours시간',
         style: const TextStyle(fontSize: 12, color: AppTheme.textLight),
       );
     }
 
     final timeString = ActivityStatusCalculator.formatTimeAgo(lastActivity);
     final warningTime = alertThresholdHours - 1;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -90,7 +90,7 @@ class ActivityStatusDisplay extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          '주의: ${warningTime}시간 • 알림: ${alertThresholdHours}시간',
+          '주의: $warningTime시간 • 알림: $alertThresholdHours시간',
           style: const TextStyle(fontSize: 12, color: AppTheme.textLight),
         ),
       ],
@@ -102,7 +102,7 @@ class ActivityStatusDisplay extends StatelessWidget {
       case ActivityStatus.normal:
         return AppTheme.primaryGreen;
       case ActivityStatus.warning:
-        return AppTheme.warningYellow;
+        return AppTheme.survivalWarning;
       case ActivityStatus.alert:
         return AppTheme.errorRed;
       case ActivityStatus.noData:
