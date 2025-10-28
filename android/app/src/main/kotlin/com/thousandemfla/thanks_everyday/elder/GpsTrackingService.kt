@@ -26,7 +26,7 @@ class GpsTrackingService : Service() {
         private const val TAG = "GpsTrackingService"
         private const val NOTIFICATION_ID = 1001 // Shared with ScreenMonitorService
         private const val CHANNEL_ID = "health_monitoring_channel" // Shared channel
-        private const val UPDATE_INTERVAL_MS = 2 * 60 * 1000L // 2 minutes
+        private const val UPDATE_INTERVAL_MS = 15 * 60 * 1000L // 15 minutes (matches Firebase Function schedule)
         
         private val isServiceRunning = AtomicBoolean(false)
         

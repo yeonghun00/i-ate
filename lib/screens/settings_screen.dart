@@ -164,6 +164,39 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
+  // Force immediate Firebase update with survival signal, battery, and GPS
+  Future<void> _forceFirebaseUpdate() async {
+    try {
+      AppLogger.info('Forcing immediate Firebase update after permission grant', tag: 'SettingsScreen');
+
+      // 1. Force activity update (survival signal + battery)
+      final activitySuccess = await _firebaseService.forceActivityUpdate();
+      if (activitySuccess) {
+        AppLogger.info('✅ Activity and battery updated', tag: 'SettingsScreen');
+      }
+
+      // 2. Force GPS location update (if location tracking enabled)
+      if (_locationTrackingEnabled) {
+        final position = await LocationService.getCurrentLocation();
+        if (position != null) {
+          final locationSuccess = await _firebaseService.forceLocationUpdate(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            address: '',
+          );
+          if (locationSuccess) {
+            AppLogger.info('✅ GPS location updated', tag: 'SettingsScreen');
+          }
+        }
+      }
+
+      _showMessage('상태가 Firebase에 즉시 업데이트되었습니다');
+    } catch (e) {
+      AppLogger.error('Failed to force Firebase update: $e', tag: 'SettingsScreen');
+      _showMessage('업데이트 중 오류가 발생했습니다');
+    }
+  }
+
   void _showDeleteAccountDialog() {
     showDialog(
       context: context,
@@ -1222,7 +1255,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
     if (backgroundGranted) {
       AppLogger.info('SUCCESS: Background location permission GRANTED - "Always allow" was selected!', tag: 'SettingsScreen');
-      AppLogger.info('GPS will now work continuously every 2 minutes even when app is killed', tag: 'SettingsScreen');
+      AppLogger.info('GPS will now work continuously every 15 minutes even when app is killed', tag: 'SettingsScreen');
     } else {
       AppLogger.warning('Background location permission DENIED - user selected "While using app" or denied', tag: 'SettingsScreen');
     }
@@ -1482,10 +1515,13 @@ class _SettingsScreenState extends State<SettingsScreen>
             child: PermissionGuideWidget(
               showDismissButton: true,
               compactMode: false,
-              onAllPermissionsGranted: () {
+              onAllPermissionsGranted: () async {
                 Navigator.of(context).pop();
                 _loadSettings(); // Refresh settings
                 _showMessage('모든 권한이 설정되었습니다!');
+
+                // Immediately update Firebase with current status
+                await _forceFirebaseUpdate();
               },
             ),
           ),

@@ -330,15 +330,15 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     AppLogger.debug('_completeSetup called, navigating to main page', tag: 'SpecialPermissionGuideScreen');
     AppLogger.debug('Current widget mounted: $mounted', tag: 'SpecialPermissionGuideScreen');
     AppLogger.debug('Current permissions - usage: $_hasUsagePermission, battery: $_hasBatteryPermission', tag: 'SpecialPermissionGuideScreen');
-    
+
     // Ensure we have all permissions before proceeding
-    if (!_backgroundLocationGranted || !_overlayGranted || 
-        !_hasUsagePermission || !_hasBatteryPermission || 
+    if (!_backgroundLocationGranted || !_overlayGranted ||
+        !_hasUsagePermission || !_hasBatteryPermission ||
         (_isMiuiDevice && !_miuiAutostartPermissionAcknowledged)) {
       AppLogger.warning('Not all permissions granted - cannot complete setup', tag: 'SpecialPermissionGuideScreen');
       return;
     }
-    
+
     // Store completion in SharedPreferences first
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -347,20 +347,26 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
     } catch (e) {
       AppLogger.error('Failed to store setup completion: $e', tag: 'SpecialPermissionGuideScreen');
     }
-    
-    // CRITICAL FIX: Call callback to initialize services without waiting for async operations
-    // This ensures proper service initialization synchronously
+
+    // CRITICAL FIX: Call callback and WAIT for it to complete before navigating
+    // This ensures services are fully initialized before HomePage loads
     try {
       AppLogger.debug('Calling onPermissionsComplete callback for service initialization...', tag: 'SpecialPermissionGuideScreen');
       widget.onPermissionsComplete();
-      AppLogger.debug('onPermissionsComplete callback executed synchronously', tag: 'SpecialPermissionGuideScreen');
+      AppLogger.debug('onPermissionsComplete callback executed', tag: 'SpecialPermissionGuideScreen');
+
+      // Wait a moment for async initialization to complete
+      // This gives time for location services, firebase services, etc. to initialize
+      await Future.delayed(const Duration(milliseconds: 500));
+      AppLogger.debug('Service initialization delay completed', tag: 'SpecialPermissionGuideScreen');
+
     } catch (e) {
       AppLogger.error('Callback execution failed: $e', tag: 'SpecialPermissionGuideScreen');
     }
-    
-    // Navigate immediately without any delay - this is the critical fix
+
+    // Navigate after services are initialized
     if (mounted) {
-      AppLogger.debug('Navigating to HomePage immediately after callback', tag: 'SpecialPermissionGuideScreen');
+      AppLogger.debug('Navigating to HomePage after service initialization', tag: 'SpecialPermissionGuideScreen');
       try {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const HomePage()),

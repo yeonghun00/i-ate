@@ -25,6 +25,7 @@ import com.thousandemfla.thanks_everyday.elder.ScreenMonitorService
 import com.thousandemfla.thanks_everyday.elder.EnhancedUsageMonitor
 import com.thousandemfla.thanks_everyday.elder.MiuiPermissionHelper
 import com.thousandemfla.thanks_everyday.elder.AlternativeBootDetector
+import com.thousandemfla.thanks_everyday.services.BatteryService
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.thousandemfla.thanks_everyday/screen_monitor"
@@ -197,6 +198,10 @@ class MainActivity : FlutterActivity() {
                         "hasAutoStartPermission" to MiuiPermissionHelper.checkAutoStartPermission(this)
                     )
                     result.success(status)
+                }
+                "getBatteryInfo" -> {
+                    val batteryInfo = BatteryService.getBatteryInfo(this)
+                    result.success(batteryInfo)
                 }
                 "getAlternativeBootStatus" -> {
                     val status = AlternativeBootDetector.getAlternativeDetectionStatus(this)
@@ -449,7 +454,7 @@ class MainActivity : FlutterActivity() {
             // No dynamic registration - this ensures immediate unlock detection works when app is closed
             
             Log.d(TAG, "GPS-like survival signal monitoring started successfully:")
-            Log.d(TAG, "  - AlarmManager: Checks screen state every 2 minutes")
+            Log.d(TAG, "  - AlarmManager: Checks screen state every 15 minutes")
             Log.d(TAG, "  - PowerManager: Detects screen ON/OFF reliably")
             Log.d(TAG, "  - ScreenStateReceiver: Detects immediate unlock (USER_PRESENT) from AndroidManifest.xml")
             Log.d(TAG, "  - ScreenMonitorService: Foreground service provides backup detection & app persistence")

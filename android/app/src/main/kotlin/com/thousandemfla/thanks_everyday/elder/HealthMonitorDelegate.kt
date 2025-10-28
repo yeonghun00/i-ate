@@ -378,7 +378,7 @@ class HealthMonitorDelegate private constructor(private val context: Context) {
             alarmManager.setRepeating(
                 AlarmManager.RTC_WAKEUP,
                 System.currentTimeMillis() + 5000, // Start in 5 seconds
-                120000, // 2 minutes
+                900000, // 15 minutes (matches Firebase Function schedule)
                 gpsPendingIntent
             )
             
@@ -393,7 +393,7 @@ class HealthMonitorDelegate private constructor(private val context: Context) {
             alarmManager.setRepeating(
                 AlarmManager.RTC_WAKEUP,
                 System.currentTimeMillis() + 10000, // Start in 10 seconds
-                120000, // 2 minutes
+                900000, // 15 minutes (matches Firebase Function schedule)
                 screenPendingIntent
             )
             

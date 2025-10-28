@@ -234,6 +234,42 @@ exports.sendNotification = functions.runWith({
   }
 });
 
+// Helper function to check if current time is within sleep period
+function isCurrentlySleepTime(settings) {
+  if (!settings || !settings.sleepExclusionEnabled) {
+    return false;
+  }
+
+  const now = new Date();
+  const sleepStartHour = settings.sleepStartHour || 22;
+  const sleepStartMinute = settings.sleepStartMinute || 0;
+  const sleepEndHour = settings.sleepEndHour || 6;
+  const sleepEndMinute = settings.sleepEndMinute || 0;
+  const sleepActiveDays = settings.sleepActiveDays || [1, 2, 3, 4, 5, 6, 7];
+
+  // Check if today is an active sleep day
+  const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
+  const mondayBased = dayOfWeek === 0 ? 7 : dayOfWeek; // Convert to Monday=1, Sunday=7
+
+  if (!sleepActiveDays.includes(mondayBased)) {
+    return false;
+  }
+
+  // Current time in minutes since midnight
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute;
+  const sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute;
+
+  // Check if in sleep period
+  if (sleepStartMinutes > sleepEndMinutes) {
+    // Overnight period (e.g., 22:00 - 06:00)
+    return currentMinutes >= sleepStartMinutes || currentMinutes <= sleepEndMinutes;
+  } else {
+    // Same-day period (e.g., 14:00 - 16:00)
+    return currentMinutes >= sleepStartMinutes && currentMinutes <= sleepEndMinutes;
+  }
+}
+
 // Monitor all families for survival alerts - RUNS EVERY 15 MINUTES ON GOOGLE'S SERVERS
 exports.checkFamilySurvival = functions.pubsub
   .schedule('every 15 minutes')
@@ -288,7 +324,15 @@ exports.checkFamilySurvival = functions.pubsub
         
         if (diffHours > alertHours) {
           console.log(`🚨 SURVIVAL ALERT: ${elderlyName} inactive for ${diffHours.toFixed(1)} hours`);
-          
+
+          // Check if currently in sleep time
+          if (isCurrentlySleepTime(familyData.settings)) {
+            const sleepStart = familyData.settings?.sleepStartHour || 22;
+            const sleepEnd = familyData.settings?.sleepEndHour || 6;
+            console.log(`😴 ${elderlyName} is in sleep period (${sleepStart}:00-${sleepEnd}:00) - skipping alert`);
+            return;
+          }
+
           // Check if alert already active to avoid spam
           const currentAlert = familyData.survivalAlert;
           if (currentAlert?.isActive) {

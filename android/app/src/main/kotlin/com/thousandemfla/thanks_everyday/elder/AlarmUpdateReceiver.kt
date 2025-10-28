@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.thousandemfla.thanks_everyday.services.BatteryService
 
 class AlarmUpdateReceiver : BroadcastReceiver() {
     
@@ -30,8 +31,8 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         private const val ACTION_GPS_UPDATE = "com.thousandemfla.thanks_everyday.GPS_UPDATE"
         private const val ACTION_SURVIVAL_UPDATE = "com.thousandemfla.thanks_everyday.SURVIVAL_UPDATE"
         
-        // 2-minute interval for both services
-        private const val INTERVAL_MILLIS = 2 * 60 * 1000L
+        // 15-minute interval for both services (matches Firebase Function schedule)
+        private const val INTERVAL_MILLIS = 15 * 60 * 1000L
         
         /**
          * Enable GPS location tracking - ALWAYS updates regardless of screen
@@ -46,7 +47,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             // Start GPS alarms
             scheduleGpsAlarm(context)
             
-            Log.i(TAG, "✅ GPS location tracking enabled - will update every 2 minutes ALWAYS")
+            Log.i(TAG, "✅ GPS location tracking enabled - will update every 15 minutes ALWAYS")
         }
         
         /**
@@ -82,7 +83,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             // Start survival alarms
             scheduleSurvivalAlarm(context)
             
-            Log.i(TAG, "✅ Survival signal monitoring enabled with 2-minute intervals")
+            Log.i(TAG, "✅ Survival signal monitoring enabled with 15-minute intervals")
         }
         
         /**
@@ -117,7 +118,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 
                 scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent)
                 
-                Log.d(TAG, "✅ GPS alarm scheduled for 2 minutes")
+                Log.d(TAG, "✅ GPS alarm scheduled for 15 minutes")
                 
                 // Record scheduling time
                 recordAlarmScheduled(context, "gps")
@@ -144,7 +145,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 
                 scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent)
                 
-                Log.d(TAG, "✅ Survival alarm scheduled for 2 minutes")
+                Log.d(TAG, "✅ Survival alarm scheduled for 15 minutes")
                 
                 // Record scheduling time
                 recordAlarmScheduled(context, "survival")
@@ -571,7 +572,10 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         try {
             val db = FirebaseFirestore.getInstance()
             val location = getCurrentLocation(context)
-            
+
+            // Get battery info
+            val batteryInfo = BatteryService.getBatteryInfo(context)
+
             if (location != null) {
                 val locationData = mapOf(
                     "latitude" to location.latitude,
@@ -581,11 +585,21 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                     "provider" to (location.provider ?: "unknown"),
                     "address" to "" // Keep existing address field
                 )
-                
+
+                val updateData = mutableMapOf<String, Any>(
+                    "location" to locationData,
+                    "batteryLevel" to batteryInfo["batteryLevel"]!!,
+                    "isCharging" to batteryInfo["isCharging"]!!,
+                    "batteryHealth" to batteryInfo["batteryHealth"]!!,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
                 db.collection("families").document(familyId)
-                    .update(mapOf("location" to locationData))
+                    .update(updateData)
                     .addOnSuccessListener {
-                        Log.i(TAG, "✅ GPS location updated in Firebase: ${location.latitude}, ${location.longitude}")
+                        val batteryLevel = batteryInfo["batteryLevel"] as Int
+                        val isCharging = batteryInfo["isCharging"] as Boolean
+                        Log.i(TAG, "✅ GPS location updated in Firebase: ${location.latitude}, ${location.longitude} | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
                     }
                     .addOnFailureListener { e ->
                         Log.e(TAG, "❌ Failed to update GPS location in Firebase: ${e.message}")
@@ -627,19 +641,32 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val familyId = prefs.getString("flutter.family_id", null)
             ?: prefs.getString("family_id", null)
-        
+
         if (familyId.isNullOrEmpty()) {
             Log.e(TAG, "❌ No family ID found for survival signal")
             return
         }
-        
+
         try {
             val db = FirebaseFirestore.getInstance()
-            
+
+            // Get battery info
+            val batteryInfo = BatteryService.getBatteryInfo(context)
+
+            val updateData = mapOf(
+                "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                "batteryLevel" to batteryInfo["batteryLevel"]!!,
+                "isCharging" to batteryInfo["isCharging"]!!,
+                "batteryHealth" to batteryInfo["batteryHealth"]!!,
+                "batteryTimestamp" to FieldValue.serverTimestamp()
+            )
+
             db.collection("families").document(familyId)
-                .update("lastPhoneActivity", FieldValue.serverTimestamp())
+                .update(updateData)
                 .addOnSuccessListener {
-                    Log.d(TAG, "✅ Survival signal updated in Firebase")
+                    val batteryLevel = batteryInfo["batteryLevel"] as Int
+                    val isCharging = batteryInfo["isCharging"] as Boolean
+                    Log.d(TAG, "✅ Survival signal updated in Firebase | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
                 }
                 .addOnFailureListener { e ->
                     Log.e(TAG, "❌ Failed to update survival signal: ${e.message}")

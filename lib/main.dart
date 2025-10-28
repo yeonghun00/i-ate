@@ -245,12 +245,24 @@ class _AppWrapperState extends State<AppWrapper> {
       if (locationEnabled) {
         await LocationService.setLocationTrackingEnabled(true);
         AppLogger.info('✅ Location tracking enabled', tag: 'AppWrapper');
-        
-        // Force immediate location update after setup
+
+        // Force immediate location update after setup AND sync to Firebase
         AppLogger.info('📍 Getting initial location after setup...', tag: 'AppWrapper');
         final position = await LocationService.getCurrentLocation();
         if (position != null) {
           AppLogger.info('✅ Initial location obtained: ${position.latitude}, ${position.longitude}', tag: 'AppWrapper');
+
+          // CRITICAL FIX: Update Firebase with initial location immediately
+          try {
+            final firebaseService = FirebaseService();
+            await firebaseService.forceLocationUpdate(
+              latitude: position.latitude,
+              longitude: position.longitude,
+            );
+            AppLogger.info('✅ Initial location synced to Firebase', tag: 'AppWrapper');
+          } catch (e) {
+            AppLogger.error('❌ Failed to sync initial location to Firebase: $e', tag: 'AppWrapper');
+          }
         } else {
           AppLogger.warning('❌ Failed to get initial location', tag: 'AppWrapper');
         }
@@ -413,7 +425,7 @@ class _HomePageState extends State<HomePage> {
         
         AppLogger.info('🔄 Starting WorkManager for background updates...', tag: 'HomePage');
         await ScreenMonitorService.startMonitoring();
-        AppLogger.info('✅ WorkManager scheduled for 2-minute updates', tag: 'HomePage');
+        AppLogger.info('✅ WorkManager scheduled for 15-minute updates', tag: 'HomePage');
         
         // CRITICAL FIX: Force immediate Firebase sync
         AppLogger.info('🔄 Forcing immediate Firebase activity sync...', tag: 'HomePage');

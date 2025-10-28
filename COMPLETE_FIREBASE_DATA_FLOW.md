@@ -496,7 +496,161 @@ await _firestore.collection('families').doc(_familyId).update({
 
 ---
 
-### 5. CHILD APP JOINS (Using Connection Code)
+### 5. PARENT APP RECOVERY (After Reinstallation)
+
+**Flow Location:** `lib/screens/account_recovery_screen.dart` → `lib/services/firebase_service.dart`
+
+#### When Triggered:
+- User reinstalls app (all local data lost)
+- User clicks "이미 계정이 있어요" button on initial setup
+- User enters name + connection code to recover account
+
+#### Step 1: User Enters Recovery Info
+
+**Operation A - Search for Family by Connection Code:**
+```dart
+// firebase_service.dart, Line 783-786
+final query = await _firestore
+    .collection('families')
+    .where('connectionCode', isEqualTo: connectionCode)
+    .get();
+```
+
+**Firestore Path:** `families/` (query)
+**Operation Type:** READ (`.where().get()`)
+
+#### Step 2: Fuzzy Name Matching
+
+**Operation B - Verify Name Match:**
+```dart
+// firebase_service.dart, Line 805
+final matchScore = _calculateNameMatchScore(name, elderlyName);
+
+if (matchScore >= 0.7) { // 70% similarity threshold
+  // Accept as match
+}
+```
+
+**Matching Features:**
+- Removes spaces: "이 영훈" → "이영훈"
+- Handles honorifics: "김할머니" vs "김○○할머니"
+- Levenshtein distance calculation
+- 70% minimum similarity required
+
+#### Step 3: Restore Account with New User ID
+
+**Operation C - Add New User to Family (CRITICAL FIX):**
+```dart
+// firebase_service.dart, Line 1166-1170
+await _firestore.collection('families').doc(familyId).update({
+  'memberIds': FieldValue.arrayUnion([currentUserId]),
+  'recoveredAt': FieldValue.serverTimestamp(),
+  'recoveredBy': currentUserId,
+});
+```
+
+**Firestore Path:** `families/{familyId}`
+**Operation Type:** UPDATE (`.update()`)
+**Data Updated:**
+```json
+{
+  "memberIds": ["old_user_id", "new_user_id"],  // Both devices can access now
+  "recoveredAt": Timestamp(server),
+  "recoveredBy": "new_user_id"
+}
+```
+
+**Why This is Critical:**
+- Old device: `createdBy: "user_abc123"`, `memberIds: ["user_abc123"]`
+- New device: Firebase Auth creates NEW user ID: `"user_xyz789"`
+- Without this update: New user not in `memberIds` → Permission denied ❌
+- With this update: New user added to `memberIds` → Access granted ✅
+
+#### Step 4: Restore Local Storage
+
+**Operation D - Save Data Locally:**
+```dart
+// firebase_service.dart, Line 1175-1178
+await _storage.setString('family_id', familyId);
+await _storage.setString('family_code', connectionCode);
+await _storage.setString('elderly_name', elderlyName);
+await _storage.setBool('setup_complete', true);
+```
+
+**Storage Type:** SharedPreferences (local device)
+**Data Restored:**
+- `family_id`: Family document ID
+- `family_code`: 4-digit connection code
+- `elderly_name`: User's registered name
+- `setup_complete`: Setup completion flag
+
+#### Step 5: Navigate to Permission Setup
+
+**Operation E - Re-request Permissions:**
+```dart
+// account_recovery_screen.dart, Line 67-76
+Navigator.of(context).pushReplacement(
+  MaterialPageRoute(
+    builder: (context) => SpecialPermissionGuideScreen(
+      onPermissionsComplete: () {
+        widget.onRecoveryComplete();
+      },
+    ),
+  ),
+);
+```
+
+**Why Needed:**
+- New device needs fresh permission grants
+- Location, battery optimization, usage stats, etc.
+- Android permissions don't transfer between installations
+
+#### Recovery Flow Summary
+
+```
+1. User clicks "이미 계정이 있어요"
+   ↓
+2. Enter name: "이영훈" + code: "1234"
+   ↓
+3. Query Firebase: families.where('connectionCode', '==', '1234')
+   ↓
+4. Fuzzy match name (≥70% similarity)
+   ↓
+5. CRITICAL: Add new user ID to memberIds
+   ├─> Old: memberIds: ["user_abc123"]
+   └─> New: memberIds: ["user_abc123", "user_xyz789"]
+   ↓
+6. Restore local storage
+   ├─> family_id
+   ├─> family_code
+   ├─> elderly_name
+   └─> setup_complete
+   ↓
+7. Navigate to permission setup
+   ↓
+8. User grants permissions again
+   ↓
+9. HOME PAGE - Fully recovered! ✅
+```
+
+**Firestore Security Rule for Recovery:**
+```javascript
+// firestore.rules, Line 73-85
+function isRecoveringParent() {
+  return request.auth != null &&
+         request.auth.uid in request.resource.data.get('memberIds', []) &&
+         !(request.auth.uid in resource.data.get('memberIds', [])) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['memberIds', 'recoveredAt', 'recoveredBy']);
+}
+
+// Line 124: Added to UPDATE permission
+allow update: if isRecoveringParent() || ...
+```
+
+---
+
+### 6. CHILD APP JOINS (Using Connection Code)
 
 **Flow Location:** Child app `lib/services/family_connection_service.dart`
 

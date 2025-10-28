@@ -200,7 +200,7 @@ class LocationService {
       AppLogger.debug('Native location update: $latitude, $longitude (accuracy: ${accuracy}m)', tag: 'LocationService');
       
       // CRITICAL FIX: Check if location update should be throttled
-      // For 2-minute GPS requirement, we should allow most updates but prevent spam
+      // For 15-minute GPS requirement, we should allow most updates but prevent spam
       if (_locationThrottler.shouldThrottleUpdate(latitude, longitude)) {
         AppLogger.debug('Native location update throttled - not significant enough change', tag: 'LocationService');
         return;

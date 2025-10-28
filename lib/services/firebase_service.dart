@@ -8,6 +8,7 @@ import 'package:thanks_everyday/services/family/family_data_manager.dart';
 import 'package:thanks_everyday/services/location/location_throttler.dart';
 import 'package:thanks_everyday/services/activity/activity_batcher.dart';
 import 'package:thanks_everyday/services/encryption_service.dart';
+import 'package:thanks_everyday/services/battery_service.dart';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
@@ -616,24 +617,45 @@ class FirebaseService {
         AppLogger.error('CRITICAL: Cannot update phone activity - familyId: $_familyId', tag: 'FirebaseService');
         return false;
       }
-      
+
       AppLogger.info('Activity update - familyId: $_familyId, forceImmediate: $forceImmediate', tag: 'FirebaseService');
-      
+
       // Check if we should batch this update
       if (_activityBatcher.shouldBatchUpdate(forceImmediate: forceImmediate)) {
         AppLogger.debug('Batching activity update', tag: 'FirebaseService');
         return true;
       }
-      
-      // Send update to Firebase
-      await _firestore.collection('families').doc(_familyId).update({
+
+      // Get battery info
+      final batteryInfo = await BatteryService.getBatteryInfo();
+
+      final updateData = <String, dynamic>{
         'lastPhoneActivity': FieldValue.serverTimestamp(),
         'lastActivityType': _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity',
         'updateTimestamp': FieldValue.serverTimestamp(),
-      });
-      
+      };
+
+      // Add battery info if available
+      if (batteryInfo != null) {
+        updateData['batteryLevel'] = batteryInfo['batteryLevel'];
+        updateData['isCharging'] = batteryInfo['isCharging'];
+        updateData['batteryHealth'] = batteryInfo['batteryHealth'];
+        updateData['batteryTimestamp'] = FieldValue.serverTimestamp();
+      }
+
+      // Send update to Firebase
+      await _firestore.collection('families').doc(_familyId).update(updateData);
+
       _activityBatcher.recordBatch();
-      AppLogger.info('Activity update sent to Firebase', tag: 'FirebaseService');
+
+      if (batteryInfo != null) {
+        final batteryLevel = batteryInfo['batteryLevel'] as int;
+        final isCharging = batteryInfo['isCharging'] as bool;
+        AppLogger.info('Activity update sent to Firebase | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}', tag: 'FirebaseService');
+      } else {
+        AppLogger.info('Activity update sent to Firebase', tag: 'FirebaseService');
+      }
+
       return true;
     } catch (e) {
       AppLogger.error('Failed to update phone activity: $e', tag: 'FirebaseService');
@@ -652,7 +674,7 @@ class FirebaseService {
         AppLogger.warning('Cannot update location: no family ID', tag: 'FirebaseService');
         return false;
       }
-      
+
       // Check if location update should be throttled
       if (!forceUpdate && _locationThrottler.shouldThrottleUpdate(latitude, longitude)) {
         AppLogger.debug('Location update throttled', tag: 'FirebaseService');
@@ -670,16 +692,37 @@ class FirebaseService {
         base64Key: encryptionKey,
       );
 
-      await _firestore.collection('families').doc(_familyId).update({
+      // Get battery info
+      final batteryInfo = await BatteryService.getBatteryInfo();
+
+      final updateData = <String, dynamic>{
         'location': {
           'encrypted': encryptedData['encrypted'],
           'iv': encryptedData['iv'],
           'timestamp': FieldValue.serverTimestamp(),
         },
-      });
+      };
+
+      // Add battery info if available
+      if (batteryInfo != null) {
+        updateData['batteryLevel'] = batteryInfo['batteryLevel'];
+        updateData['isCharging'] = batteryInfo['isCharging'];
+        updateData['batteryHealth'] = batteryInfo['batteryHealth'];
+        updateData['batteryTimestamp'] = FieldValue.serverTimestamp();
+      }
+
+      await _firestore.collection('families').doc(_familyId).update(updateData);
 
       _locationThrottler.recordUpdate(latitude, longitude);
-      AppLogger.info('Encrypted location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
+
+      if (batteryInfo != null) {
+        final batteryLevel = batteryInfo['batteryLevel'] as int;
+        final isCharging = batteryInfo['isCharging'] as bool;
+        AppLogger.info('Encrypted location updated in Firebase: $latitude, $longitude | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}', tag: 'FirebaseService');
+      } else {
+        AppLogger.info('Encrypted location updated in Firebase: $latitude, $longitude', tag: 'FirebaseService');
+      }
+
       return true;
     } catch (e) {
       AppLogger.error('Failed to update location: $e', tag: 'FirebaseService');
@@ -1108,16 +1151,37 @@ class FirebaseService {
     required String elderlyName,
   }) async {
     try {
+      // Ensure user is authenticated
+      await _authManager.ensureAuthenticated();
+      final currentUserId = _authManager.currentUserId;
+
+      if (currentUserId == null || currentUserId.isEmpty) {
+        throw Exception('Cannot restore data: no authenticated user');
+      }
+
+      AppLogger.info('Restoring data for user: $currentUserId, family: $familyId', tag: 'FirebaseService');
+
+      // CRITICAL FIX: Add current user to family's memberIds
+      // This allows the new device to write to the family document
+      await _firestore.collection('families').doc(familyId).update({
+        'memberIds': FieldValue.arrayUnion([currentUserId]),
+        'recoveredAt': FieldValue.serverTimestamp(),
+        'recoveredBy': currentUserId,
+      });
+
+      AppLogger.info('✅ Added user $currentUserId to family memberIds', tag: 'FirebaseService');
+
+      // Restore local storage
       await _storage.setString('family_id', familyId);
       await _storage.setString('family_code', connectionCode);
       await _storage.setString('elderly_name', elderlyName);
       await _storage.setBool('setup_complete', true);
-      
+
       // Update instance variables
       _familyId = familyId;
       _familyCode = connectionCode;
       _elderlyName = elderlyName;
-      
+
       AppLogger.info('Local data restored successfully', tag: 'FirebaseService');
     } catch (e) {
       AppLogger.error('Failed to restore local data: $e', tag: 'FirebaseService');

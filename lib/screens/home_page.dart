@@ -387,11 +387,14 @@ class _HomePageState extends State<HomePage> with AppLogger {
               if (_shouldShowPermissionGuide)
                 PermissionGuideWidget(
                   compactMode: true,
-                  onAllPermissionsGranted: () {
+                  onAllPermissionsGranted: () async {
                     setState(() {
                       _shouldShowPermissionGuide = false;
                     });
                     _showMessage('모든 권한이 설정되었습니다! 안전 확인 기능이 활성화되었습니다.');
+
+                    // Immediately update Firebase with current status
+                    await _forceInitialUpdates();
                   },
                 ),
               
