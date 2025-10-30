@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
+import com.thousandemfla.thanks_everyday.R
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -140,7 +141,7 @@ class GpsTrackingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
+            .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -327,7 +328,7 @@ class GpsTrackingService : Service() {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(mainText)
-                .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
+                .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setAutoCancel(false)

@@ -584,17 +584,56 @@ await _storage.setBool('setup_complete', true);
 - `elderly_name`: User's registered name
 - `setup_complete`: Setup completion flag
 
-#### Step 5: Navigate to Permission Setup
+#### Step 5: Navigate to Post-Recovery Settings Screen
 
-**Operation E - Re-request Permissions:**
+**Operation E - Re-configure Lost Settings:**
 ```dart
 // account_recovery_screen.dart, Line 67-76
 Navigator.of(context).pushReplacement(
   MaterialPageRoute(
+    builder: (context) => PostRecoverySettingsScreen(
+      onComplete: widget.onRecoveryComplete,
+    ),
+  ),
+);
+```
+
+**Why Needed:**
+- SharedPreferences (local storage) is lost during app reinstallation
+- Critical settings lost: survival signal, GPS tracking, sleep time exclusion
+- User must re-enable these features manually
+
+**PostRecoverySettingsScreen Features:**
+- Shows success icon "계정 복구 완료!"
+- Toggles for re-enabling monitoring features:
+  - **안전 확인 알림** (Survival Signal) - Default: ON
+  - **GPS 위치 추적** (Location Tracking) - Default: ON
+  - **수면 시간 제외** (Sleep Time Exclusion) - Only shown if survival signal enabled
+    - Sleep start/end time picker
+    - Active days selector (Mon-Sun)
+- Saves to **both Firebase AND SharedPreferences**:
+  ```dart
+  // Firebase (Line 329-334)
+  await _firebaseService.updateFamilySettings(
+    survivalSignalEnabled: _survivalSignalEnabled,
+    sleepTimeSettings: sleepSettings,
+  );
+
+  // SharedPreferences (Line 342-355)
+  await prefs.setBool('flutter.survival_signal_enabled', ...);
+  await prefs.setBool('flutter.location_tracking_enabled', ...);
+  await prefs.setBool('flutter.sleep_exclusion_enabled', ...);
+  ```
+
+#### Step 6: Navigate to Permission Setup
+
+**Operation F - Re-request Permissions:**
+```dart
+// post_recovery_settings_screen.dart, Line 364-370
+Navigator.of(context).pushReplacement(
+  MaterialPageRoute(
     builder: (context) => SpecialPermissionGuideScreen(
-      onPermissionsComplete: () {
-        widget.onRecoveryComplete();
-      },
+      onPermissionsComplete: widget.onComplete,
     ),
   ),
 );
@@ -626,11 +665,18 @@ Navigator.of(context).pushReplacement(
    ├─> elderly_name
    └─> setup_complete
    ↓
-7. Navigate to permission setup
+7. Navigate to PostRecoverySettingsScreen
+   ├─> Re-enable: Survival Signal (안전 확인 알림)
+   ├─> Re-enable: GPS Tracking (GPS 위치 추적)
+   ├─> Optional: Sleep Time Exclusion (수면 시간 제외)
+   ├─> Save to Firebase: settings.survivalSignalEnabled, sleepTimeSettings
+   └─> Save to SharedPreferences: local monitoring flags
    ↓
-8. User grants permissions again
+8. Navigate to permission setup
    ↓
-9. HOME PAGE - Fully recovered! ✅
+9. User grants permissions again
+   ↓
+10. HOME PAGE - Fully recovered! ✅
 ```
 
 **Firestore Security Rule for Recovery:**
@@ -647,6 +693,54 @@ function isRecoveringParent() {
 // Line 124: Added to UPDATE permission
 allow update: if isRecoveringParent() || ...
 ```
+
+#### CRITICAL BUG FIX: Settings Loading After Recovery
+
+**Problem:** After account recovery, when settings are saved and auto-reloaded, the app was calling `getFamilyInfo(connectionCode)` which queries the `connection_codes` collection. However, after account recovery, the `connection_codes` document might not exist or be inaccessible, causing settings to always reset to default (12 hours).
+
+**Log Evidence:**
+```
+✅ Firebase settings updated successfully
+❌ No connection code found: 4114
+⚠️ No family info found in Firebase, using default: 12
+📱 Settings loaded - Alert hours: 12
+```
+
+**Root Cause:**
+- `getFamilyInfo(connectionCode)` → queries `connection_codes/{code}` first
+- Post-recovery: `connection_codes` document may be missing or outdated
+- Settings reload fails → falls back to default 12 hours ❌
+
+**Solution Implemented:**
+1. **Added new method:** `getFamilyInfoById(familyId)` in `firebase_service.dart:218-235`
+   - Directly queries `families/{familyId}` without `connection_codes` lookup
+   - Faster and works reliably after account recovery
+
+2. **Updated settings loading logic:** `settings_screen.dart:100-131`
+   ```dart
+   // Try familyId first (preferred method)
+   if (_firebaseService.familyId != null) {
+     familyInfo = await _firebaseService.getFamilyInfoById(_firebaseService.familyId!);
+   }
+
+   // Fallback to connection code if familyId didn't work
+   if (familyInfo == null && _firebaseService.familyCode != null) {
+     familyInfo = await _firebaseService.getFamilyInfo(_firebaseService.familyCode!);
+   }
+   ```
+
+**New Flow:**
+```
+Settings Save & Auto-Reload
+    ↓
+Try getFamilyInfoById(familyId) ← Preferred (faster, recovery-safe)
+    ├─> Success ✅ → Load alertHours from Firebase
+    └─> Fail → Try getFamilyInfo(connectionCode) ← Fallback
+                ├─> Success ✅ → Load alertHours from Firebase
+                └─> Fail → Use default (12 hours)
+```
+
+**Result:** Settings now persist correctly after account recovery. AlertHours changes (3h, 6h, etc.) are maintained instead of resetting to 12 hours. ✅
 
 ---
 
@@ -766,6 +860,7 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
 | `firebase_service.dart:695-699` | `families/{familyId}` | `settings.alertHours` | Alert Settings Change |
 | `family_data_manager.dart:102` | `families/{familyId}` | `settings.*` | Settings Update |
 | `family_data_manager.dart:120-124` | `families/{familyId}` | `approved, approvedAt, memberIds` | Child App Approval |
+| `post_recovery_settings_screen.dart:329-334` | `families/{familyId}` | `settings.survivalSignalEnabled, settings.sleepTimeSettings` | Post-Recovery Settings Restore |
 
 ### READ Operations
 
@@ -773,8 +868,11 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
 |----------|-----------------|---------|
 | `firebase_service.dart:57-58` | `connection_codes/{code}` | Verify unique code |
 | `firebase_service.dart:105-109` | `connection_codes` (query) | Verify unique family ID |
+| `firebase_service.dart:204-214` | `connection_codes + families` | Get family info via connection code |
+| `firebase_service.dart:218-235` | `families/{familyId}` | Get family info directly by ID (post-recovery) |
 | `firebase_service.dart:261-266` | `families/{familyId}/meals/{date}` | Get current meal count |
 | `home_page.dart:72` | `families/{familyId}/meals/{date}` | Load today's meals |
+| `settings_screen.dart:100-131` | `families/{familyId}` | Load settings (prefers familyId, fallback to code) |
 | `family_data_manager.dart:14-31` | `connection_codes + families` | Get family info for child app |
 
 ### DELETE Operations
@@ -975,6 +1073,7 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
 - `clearFoodAlert()` - Clear food alert
 - `updateFamilySettings()` - Update settings
 - `getFamilyInfo()` - Get family info by connection code
+- `getFamilyInfoById()` - Get family info directly by familyId (faster, post-recovery safe)
 - `listenForApproval()` - Listen for approval changes (stream)
 
 ### family_data_manager.dart (Data Management)

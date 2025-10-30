@@ -203,14 +203,35 @@ class FirebaseService {
 
   Future<Map<String, dynamic>?> getFamilyInfo(String connectionCode) async {
     final data = await _familyData.getFamilyInfo(connectionCode);
-    
+
     // Update local storage if we don't have family ID
     if (data != null && _familyId == null) {
       _familyId = data['familyId'] as String;
       await _storage.setString('family_id', _familyId!);
     }
-    
+
     return data;
+  }
+
+  /// Get family info directly by familyId (faster, doesn't require connection_codes lookup)
+  /// Use this after account recovery when connection_codes document might not exist
+  Future<Map<String, dynamic>?> getFamilyInfoById(String familyId) async {
+    try {
+      final doc = await _firestore.collection('families').doc(familyId).get();
+
+      if (doc.exists) {
+        final data = doc.data()!;
+        data['familyId'] = doc.id;
+        AppLogger.info('Loaded family info directly by ID: $familyId', tag: 'FirebaseService');
+        return data;
+      }
+
+      AppLogger.error('Family document not found for ID: $familyId', tag: 'FirebaseService');
+      return null;
+    } catch (e) {
+      AppLogger.error('Failed to get family info by ID: $e', tag: 'FirebaseService');
+      return null;
+    }
   }
 
   // Save meal record with simplified approach

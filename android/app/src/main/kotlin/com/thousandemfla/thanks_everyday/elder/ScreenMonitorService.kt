@@ -15,6 +15,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.thousandemfla.thanks_everyday.R
+import com.thousandemfla.thanks_everyday.services.BatteryService
 
 class ScreenMonitorService : Service() {
     
@@ -255,7 +257,7 @@ class ScreenMonitorService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("가족과 함께하는 안전한 일상")
                 .setContentText("안전 확인 서비스가 활성화되어 있습니다")
-                .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
+                .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
                 .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for MIUI
                 .setOngoing(true)
                 .setShowWhen(false)
@@ -363,7 +365,7 @@ class ScreenMonitorService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_save) // Friendly save/care icon instead of monitoring eye
+            .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setShowWhen(false)
@@ -425,36 +427,54 @@ class ScreenMonitorService : Service() {
             // Check if monitoring is enabled
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val isEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
-            
+
             if (!isEnabled) {
                 Log.d(TAG, "📱 Monitoring disabled, skipping phone activity update (service)")
                 return
             }
-            
+
             // Get family info - CRITICAL FIX: Check both key variations
             var familyId = prefs.getString("flutter.family_id", null)
             if (familyId == null) {
                 familyId = prefs.getString("family_id", null)
                 Log.d(TAG, "🔄 Using fallback key 'family_id' in service: $familyId")
             }
-            
+
             if (familyId == null) {
                 Log.w(TAG, "⚠️ No family ID found, skipping phone activity update (service)")
                 return
             }
-            
-            // Update Firebase with real phone activity
+
+            // Get battery info
+            val batteryInfo = BatteryService.getBatteryInfo(this)
+            val batteryLevel = batteryInfo["batteryLevel"] as Int
+            val isCharging = batteryInfo["isCharging"] as Boolean
+            val batteryHealth = batteryInfo["batteryHealth"] as String
+
+            // Update Firebase with phone activity AND battery info
+            val updateData = mutableMapOf<String, Any>(
+                "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                "batteryLevel" to batteryLevel,
+                "isCharging" to isCharging,
+                "batteryTimestamp" to FieldValue.serverTimestamp()
+            )
+
+            // Optional: Add battery health if not unknown
+            if (batteryHealth != "UNKNOWN") {
+                updateData["batteryHealth"] = batteryHealth
+            }
+
             val firestore = FirebaseFirestore.getInstance()
             firestore.collection("families")
                 .document(familyId)
-                .update("lastPhoneActivity", FieldValue.serverTimestamp())
+                .update(updateData)
                 .addOnSuccessListener {
-                    Log.d(TAG, "✅ lastPhoneActivity updated from background service!")
+                    Log.d(TAG, "✅ lastPhoneActivity + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
                 }
                 .addOnFailureListener { e ->
                     Log.e(TAG, "❌ Failed to update lastPhoneActivity from service: ${e.message}")
                 }
-                
+
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error updating phone activity from service: ${e.message}")
         }

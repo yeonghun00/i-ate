@@ -23,7 +23,10 @@ dependencies:
   firebase_messaging: ^15.0.0
   # Location tracking
   geolocator: ^10.1.0
-  
+
+  # Network connectivity
+  connectivity_plus: ^6.0.5
+
   # Permissions
   permission_handler: ^11.0.0
   

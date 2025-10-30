@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:thanks_everyday/services/firebase_service.dart';
-import 'package:thanks_everyday/screens/special_permission_guide_screen.dart';
+import 'package:thanks_everyday/screens/post_recovery_settings_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 
 class AccountRecoveryScreen extends StatefulWidget {
@@ -60,17 +60,13 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
         // Wait a moment to show success message
         await Future.delayed(const Duration(seconds: 1));
         
-        // CRITICAL FIX: Direct navigation to permission setup flow
-        // Account recovery users still need to grant permissions on this device
+        // Navigate to post-recovery settings screen
+        // Let user re-enable monitoring settings that were lost during reinstall
         if (mounted) {
-          // Import statement will be needed at the top
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => SpecialPermissionGuideScreen(
-                onPermissionsComplete: () {
-                  // After permissions are complete, call the original callback
-                  widget.onRecoveryComplete();
-                },
+              builder: (context) => PostRecoverySettingsScreen(
+                onComplete: widget.onRecoveryComplete,
               ),
             ),
           );
@@ -115,16 +111,13 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
         
         await Future.delayed(const Duration(seconds: 1));
         
-        // CRITICAL FIX: Direct navigation to permission setup flow
-        // Account recovery users still need to grant permissions on this device  
+        // Navigate to post-recovery settings screen
+        // Let user re-enable monitoring settings that were lost during reinstall
         if (mounted) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => SpecialPermissionGuideScreen(
-                onPermissionsComplete: () {
-                  // After permissions are complete, call the original callback
-                  widget.onRecoveryComplete();
-                },
+              builder: (context) => PostRecoverySettingsScreen(
+                onComplete: widget.onRecoveryComplete,
               ),
             ),
           );
@@ -252,7 +245,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: AppTheme.errorRed.withOpacity(0.1),
+                      color: AppTheme.errorRed.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppTheme.errorRed),
                     ),
@@ -290,7 +283,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                       borderRadius: BorderRadius.circular(15),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           blurRadius: 10,
                           offset: const Offset(0, 5),
                         ),
@@ -308,7 +301,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        ...(_multipleCandidates!.map((candidate) => 
+                        ...(_multipleCandidates!.map((candidate) =>
                           GestureDetector(
                             onTap: () => _selectCandidate(candidate),
                             child: Container(
@@ -358,7 +351,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                               ),
                             ),
                           ),
-                        )).toList(),
+                        )),
                       ],
                     ),
                   ),
@@ -380,7 +373,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                           : AppTheme.successGradient,
                       boxShadow: !_isLoading ? [
                         BoxShadow(
-                          color: AppTheme.primaryGreen.withOpacity(0.3),
+                          color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                           blurRadius: 10,
                           offset: const Offset(0, 5),
                         ),
@@ -414,10 +407,10 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: AppTheme.primaryGreen.withOpacity(0.3),
+                      color: AppTheme.primaryGreen.withValues(alpha: 0.3),
                       width: 1,
                     ),
                   ),
@@ -495,7 +488,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Colors.black.withValues(alpha: 0.1),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),

@@ -76,11 +76,22 @@
    - elderly_name
    - setup_complete = true
    ↓
-8. Navigate to Permission Setup
+8. ⚠️ LOCAL SETTINGS ARE LOST (Need Manual Reconfiguration):
+   - ❌ 안전 확인 알림 (Survival Signal) - Disabled by default
+   - ❌ GPS 위치 추적 - Disabled by default
+   - ❌ 수면 시간 설정 - Reset to defaults
    ↓
-9. User grants permissions
+9. Post-Recovery Settings Screen (NEW!)
+   ├─> User sees: "계정 복구 완료! 설정 다시 하기"
+   ├─> Toggle: ☑️ 안전 확인 알림
+   ├─> Toggle: ☑️ GPS 위치 추적
+   └─> Button: "계속하기" → Saves settings & continues
    ↓
-10. HOME PAGE - Fully recovered! ✅
+10. Navigate to Permission Setup
+   ↓
+11. User grants permissions
+   ↓
+12. HOME PAGE - Fully recovered! ✅
 ```
 
 ### Technical Flow
@@ -196,7 +207,75 @@ function isRecoveringParent() {
 
 ---
 
-### Issue #3: No Visual Guidance for Users
+### Issue #3: Local Settings Are Lost After Recovery ⚠️ CRITICAL
+
+**Problem:** After account recovery, all device-specific settings are LOST because they're stored locally, not in Firebase.
+
+**What Gets Lost:**
+```dart
+// These are stored in SharedPreferences and NOT recovered:
+- flutter.survival_signal_enabled        → Defaults to false ❌
+- flutter.location_tracking_enabled      → Defaults to false ❌
+- flutter.sleep_exclusion_enabled        → Defaults to false ❌
+- flutter.sleep_start_hour              → Defaults to 22
+- flutter.sleep_start_minute            → Defaults to 0
+- flutter.sleep_end_hour                → Defaults to 6
+- flutter.sleep_end_minute              → Defaults to 0
+- flutter.sleep_active_days             → Defaults to all days
+```
+
+**Impact:**
+- 🔴 **Monitoring stops working** even though account is recovered
+- 🔴 Child app stops receiving updates
+- 🔴 User thinks everything is fine but it's not!
+
+**Current Storage Location:**
+| Setting | Storage | Survives Reinstall? |
+|---------|---------|---------------------|
+| 알림 시간 (Alert Hours) | Firebase ☁️ | ✅ YES |
+| 안전 확인 알림 | Local 📱 | ❌ NO |
+| GPS 위치 추적 | Local 📱 | ❌ NO |
+| 수면 시간 설정 | Local 📱 | ❌ NO |
+
+**Fix Options:**
+
+**Option 1: Move Settings to Firebase (RECOMMENDED)**
+```javascript
+// Store in Firebase so they survive reinstalls
+families/{familyId}/ {
+  settings: {
+    alertHours: 12,                     // ✅ Already in Firebase
+    survivalSignalEnabled: true,        // ← Move from local
+    locationTrackingEnabled: true,      // ← Move from local
+    sleepExclusionEnabled: false,       // ← Move from local
+    sleepTimeSettings: { ... }          // ✅ Already in Firebase
+  }
+}
+```
+
+**Option 2: Add Settings Reconfiguration Screen After Recovery** ✅ IMPLEMENTED
+- Show warning: "Settings have been reset"
+- Provide quick toggles to re-enable features
+- Guide user through settings screen
+
+**Option 3: Warn User During Recovery**
+- Add message: "You'll need to reconfigure your settings after recovery"
+- Link to settings screen after recovery completes
+
+**Status:** ✅ FIXED - PostRecoverySettingsScreen added
+
+**Implementation:**
+- New screen: `lib/screens/post_recovery_settings_screen.dart`
+- Shows after account recovery completes
+- User can re-enable:
+  - ☑️ 안전 확인 알림 (Survival Signal)
+  - ☑️ GPS 위치 추적 (Location Tracking)
+- Saves settings to SharedPreferences
+- Then continues to permission setup
+
+---
+
+### Issue #4: No Visual Guidance for Users
 
 **Problem:** Users don't know they need to save connection code
 
@@ -206,7 +285,7 @@ function isRecoveringParent() {
 
 ---
 
-### Issue #3: Fuzzy Name Matching May Be Too Strict
+### Issue #5: Fuzzy Name Matching May Be Too Strict
 
 **Current:** 70% similarity threshold
 
@@ -585,17 +664,33 @@ if (matchScore >= 0.7) {  // 70% or higher
 - Permission re-setup flow
 
 ❌ **What's Broken:**
-- Recovery button is commented out
+- Recovery button is commented out (easy fix)
 - Users cannot access recovery screen
 
-### Fix Required: **1 Line Change**
+✅ **What's Fixed:**
+- **Settings loss issue SOLVED** with PostRecoverySettingsScreen
+- User can now re-enable monitoring after recovery
+- Clear UI guidance for what was reset
 
-**Uncomment lines 1066-1100 in `initial_setup_screen.dart`**
+### Fixes Required:
 
-That's it! After uncommenting, the recovery system will be fully functional.
+**Remaining Fix (UI Only):**
+1. Uncomment lines 1066-1100 in `initial_setup_screen.dart`
+
+**Already Fixed:**
+2. ✅ Local settings data loss - PostRecoverySettingsScreen added
+   - Shows after recovery completes
+   - User re-enables 안전 확인 알림 and GPS
+   - Settings saved to SharedPreferences
+   - Monitoring works again!
 
 ---
 
-**Status:** Ready for deployment after uncommenting recovery button
-**Risk:** Low - All logic is tested and working
-**Impact:** High - Users can recover accounts after reinstall
+**Status:** ✅ Ready for deployment after uncommenting recovery button
+**Risk:** Low - Settings data loss issue is fixed
+**Impact:** High - Users can recover accounts and monitoring continues working
+**Action Required:**
+1. Uncomment recovery button in `initial_setup_screen.dart` (1 line change)
+
+**New Files Added:**
+- `lib/screens/post_recovery_settings_screen.dart` - Settings reconfiguration UI

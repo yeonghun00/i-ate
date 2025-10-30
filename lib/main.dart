@@ -10,6 +10,7 @@ import 'package:thanks_everyday/services/screen_monitor_service.dart';
 import 'package:thanks_everyday/services/smart_usage_detector.dart';
 import 'package:thanks_everyday/services/overlay_service.dart';
 import 'package:thanks_everyday/services/miui_boot_helper.dart';
+import 'package:thanks_everyday/services/connectivity_service.dart';
 import 'package:thanks_everyday/screens/initial_setup_screen.dart';
 import 'package:thanks_everyday/screens/settings_screen.dart';
 import 'package:thanks_everyday/firebase_options.dart';
@@ -58,6 +59,13 @@ void main() async {
     AppLogger.info('MiuiBootHelper initialized successfully', tag: 'Main');
   } catch (e) {
     AppLogger.warning('MiuiBootHelper initialization failed: $e', tag: 'Main');
+  }
+
+  try {
+    await ConnectivityService().initialize();
+    AppLogger.info('ConnectivityService initialized successfully', tag: 'Main');
+  } catch (e) {
+    AppLogger.warning('ConnectivityService initialization failed: $e', tag: 'Main');
   }
 
   runApp(const ThanksEverydayApp());
@@ -341,6 +349,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final FirebaseService _firebaseService = FirebaseService();
+  final ConnectivityService _connectivityService = ConnectivityService();
   int _todayMealCount = 0;
   // _lastMealTime removed - not used in current implementation
   final int _maxMealsPerDay = 3;
@@ -353,6 +362,20 @@ class _HomePageState extends State<HomePage> {
     _loadMealData();
     _initializeServices();
     _updateActivityInFirebase();
+    _setupConnectivityMonitoring();
+  }
+
+  void _setupConnectivityMonitoring() {
+    // Add listener for connectivity changes
+    _connectivityService.addListener((bool isConnected) {
+      if (mounted) {
+        if (!isConnected) {
+          ConnectivityService.showNoConnectionWarning(context);
+        } else {
+          ConnectivityService.showConnectionRestoredMessage(context);
+        }
+      }
+    });
   }
 
   Future<void> _updateActivityInFirebase() async {
@@ -478,6 +501,12 @@ class _HomePageState extends State<HomePage> {
   Future<void> _recordMeal() async {
     if (_todayMealCount >= _maxMealsPerDay) {
       _showMessage('오늘은 이미 3번의 식사를 모두 기록하셨습니다!');
+      return;
+    }
+
+    // Check internet connectivity before recording
+    if (!_connectivityService.isConnected) {
+      _showMessage('⚠️ 인터넷 연결이 없습니다. Wi-Fi 또는 모바일 데이터를 켜주세요.');
       return;
     }
 

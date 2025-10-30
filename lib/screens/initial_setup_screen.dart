@@ -8,6 +8,7 @@ import 'package:thanks_everyday/screens/guide_screen.dart';
 import 'package:thanks_everyday/screens/account_recovery_screen.dart';
 import 'package:thanks_everyday/theme/app_theme.dart';
 import 'package:thanks_everyday/models/sleep_time_settings.dart';
+import 'package:thanks_everyday/services/connectivity_service.dart';
 import 'dart:async';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
 
@@ -44,6 +45,12 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   Future<void> _setupFamily() async {
     if (_nameController.text.trim().isEmpty) {
       _showMessage('이름을 입력해주세요');
+      return;
+    }
+
+    // Check internet connectivity before setting up
+    if (!ConnectivityService().isConnected) {
+      _showMessage('⚠️ 인터넷 연결이 없습니다. Wi-Fi 또는 모바일 데이터를 켜주세요.');
       return;
     }
 
@@ -728,7 +735,44 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 40),
+
+                      const SizedBox(height: 24),
+
+                      // Internet connectivity gentle reminder
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryGreen.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: AppTheme.primaryGreen.withValues(alpha: 0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.wifi,
+                              color: AppTheme.primaryGreen,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                '자녀 앱과 연결하려면 인터넷(Wi-Fi 또는 모바일 데이터)이 필요합니다. 설정 전 인터넷 연결을 확인해주세요.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.textSecondary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
                       // Name input
                       _buildInputField(
                         controller: _nameController,

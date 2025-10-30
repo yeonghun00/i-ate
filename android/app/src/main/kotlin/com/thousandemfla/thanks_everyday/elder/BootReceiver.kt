@@ -58,56 +58,52 @@ class BootReceiver : BroadcastReceiver() {
             }
             
             if (locationEnabled) {
-                Log.i(TAG, "🌍 Starting GPS tracking (pure alarm approach)...")
+                Log.i(TAG, "🌍 Starting GPS tracking...")
                 try {
-                    // CRITICAL FIX: Use only alarm-based GPS tracking (no service dependency)
+                    // CRITICAL FIX 2025-10-29: Simplified GPS initialization (same as survival signal)
+                    // Previous code used Handler.postDelayed() which never executed after boot
+                    // because BroadcastReceiver lifecycle ends before async callbacks
                     AlarmUpdateReceiver.enableLocationTracking(context)
-                    Log.i(TAG, "✅ GPS alarm scheduled (service-free)")
-                    
-                    // Verify it was actually scheduled
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        val debugPrefs = context.getSharedPreferences("AlarmDebugPrefs", Context.MODE_PRIVATE)
-                        val lastScheduled = debugPrefs.getLong("last_gps_alarm_scheduled", 0)
-                        val currentTime = System.currentTimeMillis()
-                        
-                        if (lastScheduled > 0 && (currentTime - lastScheduled) < 30000) {
-                            Log.i(TAG, "✅ GPS alarm successfully started at boot (${currentTime - lastScheduled}ms ago)")
-                        } else {
-                            Log.e(TAG, "❌ GPS alarm NOT scheduled at boot - FAILED (last: $lastScheduled, now: $currentTime)")
-                            
-                            // Try to reschedule immediately as backup
-                            try {
-                                Log.w(TAG, "🔄 Attempting GPS alarm rescue...")
-                                AlarmUpdateReceiver.enableLocationTracking(context)
-                            } catch (rescueError: Exception) {
-                                Log.e(TAG, "❌ GPS rescue failed: ${rescueError.message}")
-                            }
-                        }
-                    }, 5000) // Give more time for scheduling
-                    
+                    Log.i(TAG, "✅ GPS tracking started (15-minute intervals)")
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ FAILED to start GPS tracking: ${e.message}", e)
+
+                    // Attempt immediate retry if scheduling failed
+                    try {
+                        Log.w(TAG, "🔄 Retrying GPS initialization...")
+                        Thread.sleep(1000) // Brief pause
+                        AlarmUpdateReceiver.enableLocationTracking(context)
+                        Log.i(TAG, "✅ GPS tracking started (retry successful)")
+                    } catch (retryError: Exception) {
+                        Log.e(TAG, "❌ GPS retry also failed: ${retryError.message}")
+                    }
                 }
             } else {
-                // CRITICAL DEBUG: Check if GPS was previously working
+                // RESCUE MODE: Check if GPS was previously working before reboot
                 val debugPrefs = context.getSharedPreferences("AlarmDebugPrefs", Context.MODE_PRIVATE)
                 val lastGpsExecution = debugPrefs.getLong("last_gps_execution", 0)
                 val lastGpsScheduled = debugPrefs.getLong("last_gps_alarm_scheduled", 0)
-                
-                if (lastGpsExecution > 0 || lastGpsScheduled > 0) {
-                    Log.w(TAG, "⚠️ GPS tracking DISABLED but previously worked - FORCING START as rescue")
-                    Log.w(TAG, "   Last GPS execution: $lastGpsExecution, Last scheduled: $lastGpsScheduled")
-                    
+
+                // If GPS was working within the last 24 hours, force re-enable it
+                val currentTime = System.currentTimeMillis()
+                val oneDayAgo = currentTime - (24 * 60 * 60 * 1000L)
+                val wasRecentlyActive = lastGpsExecution > oneDayAgo || lastGpsScheduled > oneDayAgo
+
+                if (wasRecentlyActive) {
+                    Log.w(TAG, "⚠️ GPS tracking DISABLED but was active within 24h - ACTIVATING RESCUE MODE")
+                    Log.w(TAG, "   Last GPS execution: $lastGpsExecution (${(currentTime - lastGpsExecution) / 3600000}h ago)")
+                    Log.w(TAG, "   Last GPS scheduled: $lastGpsScheduled (${(currentTime - lastGpsScheduled) / 3600000}h ago)")
+
                     try {
                         // Force enable GPS tracking and save preference
                         prefs.edit().putBoolean("flutter.location_tracking_enabled", true).apply()
                         AlarmUpdateReceiver.enableLocationTracking(context)
-                        Log.i(TAG, "✅ GPS rescue mode activated successfully")
+                        Log.i(TAG, "✅ GPS rescue mode activated - tracking restarted")
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ GPS rescue mode failed: ${e.message}")
                     }
                 } else {
-                    Log.w(TAG, "⚠️ GPS tracking is DISABLED in settings - not starting (never worked before)")
+                    Log.i(TAG, "ℹ️ GPS tracking is disabled and was not recently active - not starting")
                 }
             }
             

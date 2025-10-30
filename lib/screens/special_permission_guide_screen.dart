@@ -975,7 +975,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
           const SizedBox(height: 20),
           
           const Text(
-            'MIUI 자동 시작 권한 설정',
+            '자동 시작 권한 설정',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -983,11 +983,12 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
             ),
             textAlign: TextAlign.center,
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           const Text(
-            'Xiaomi/MIUI 기기에서는 앱의 재부팅 후 동작을 위해\n자동 시작 권한이 필요합니다.',
+            '일부 스마트폰은 배터리 절약을 위해 앱을 자동으로 종료합니다.\n'
+            '휴대폰 재부팅 후에도 앱이 계속 작동하도록 자동 시작 권한을 설정해주세요.',
             style: TextStyle(
               fontSize: 16,
               color: Color(0xFF6B7280),
@@ -1050,7 +1051,7 @@ class _SpecialPermissionGuideScreenState extends State<SpecialPermissionGuideScr
                 const SizedBox(width: 8),
                 Expanded(
                   child: const Text(
-                    '이 설정 없이는 재부팅 후 생존 신호 감지가 작동하지 않습니다.',
+                    '이 설정이 없으면 휴대폰 재시작 후 안전 확인 기능이 작동하지 않을 수 있습니다.',
                     style: TextStyle(
                       fontSize: 12,
                       color: Color(0xFFDC2626),

@@ -362,7 +362,198 @@ private fun handleSurvivalSignalAlarm(context: Context) {
 }
 ```
 
-### Step 4: Add Battery Method Channel (Flutter Bridge)
+### Step 4A: Update ScreenMonitorService to Include Battery on Screen Unlock
+
+**File:** `android/app/src/main/kotlin/com/thousandemfla/thanks_everyday/elder/ScreenMonitorService.kt`
+
+Add battery import at top:
+```kotlin
+import com.thousandemfla.thanks_everyday.services.BatteryService
+```
+
+Find the `updateLastPhoneActivity()` method (around line 423) and update it to include battery info:
+
+```kotlin
+private fun updateLastPhoneActivity() {
+    try {
+        // Check if monitoring is enabled
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val isEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+
+        if (!isEnabled) {
+            Log.d(TAG, "📱 Monitoring disabled, skipping phone activity update (service)")
+            return
+        }
+
+        // Get family info
+        var familyId = prefs.getString("flutter.family_id", null)
+        if (familyId == null) {
+            familyId = prefs.getString("family_id", null)
+        }
+
+        if (familyId == null) {
+            Log.w(TAG, "⚠️ No family ID found, skipping phone activity update (service)")
+            return
+        }
+
+        // Get battery info
+        val batteryInfo = BatteryService.getBatteryInfo(this)
+        val batteryLevel = batteryInfo["batteryLevel"] as Int
+        val isCharging = batteryInfo["isCharging"] as Boolean
+        val batteryHealth = batteryInfo["batteryHealth"] as String
+
+        // Update Firebase with phone activity AND battery info
+        val updateData = mutableMapOf<String, Any>(
+            "lastPhoneActivity" to FieldValue.serverTimestamp(),
+            "batteryLevel" to batteryLevel,
+            "isCharging" to isCharging,
+            "batteryTimestamp" to FieldValue.serverTimestamp()
+        )
+
+        // Optional: Add battery health if not unknown
+        if (batteryHealth != "UNKNOWN") {
+            updateData["batteryHealth"] = batteryHealth
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        firestore.collection("families")
+            .document(familyId)
+            .update(updateData)
+            .addOnSuccessListener {
+                Log.d(TAG, "✅ lastPhoneActivity + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "❌ Failed to update lastPhoneActivity from service: ${e.message}")
+            }
+
+    } catch (e: Exception) {
+        Log.e(TAG, "❌ Error updating phone activity from service: ${e.message}")
+    }
+}
+```
+
+**Why this matters:**
+- Handles screen unlock when service is running
+- Provides battery data during foreground service activity
+
+### Step 4B: Update ScreenStateReceiver to Include Battery (WORKS EVEN WHEN APP IS TERMINATED!)
+
+**File:** `android/app/src/main/kotlin/com/thousandemfla/thanks_everyday/elder/ScreenStateReceiver.kt`
+
+**CRITICAL:** This receiver is registered in `AndroidManifest.xml` and receives screen unlock events EVEN when the app is completely terminated!
+
+Add battery import at top:
+```kotlin
+import com.thousandemfla.thanks_everyday.services.BatteryService
+```
+
+Update the `updateFirebase()` method to include battery data:
+
+```kotlin
+private fun updateFirebase(context: Context) {
+    try {
+        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val familyId = prefs.getString("flutter.family_id", null) ?: prefs.getString("family_id", null)
+
+        if (familyId.isNullOrEmpty()) {
+            Log.w(TAG, "No family ID found")
+            return
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+
+        // Get battery info (used for both survival and GPS updates)
+        val batteryInfo = BatteryService.getBatteryInfo(context)
+        val batteryLevel = batteryInfo["batteryLevel"] as Int
+        val isCharging = batteryInfo["isCharging"] as Boolean
+        val batteryHealth = batteryInfo["batteryHealth"] as String
+
+        // Update survival signal with battery data
+        val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
+        if (survivalEnabled) {
+            val survivalUpdate = mutableMapOf<String, Any>(
+                "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                "batteryLevel" to batteryLevel,
+                "isCharging" to isCharging,
+                "batteryTimestamp" to FieldValue.serverTimestamp()
+            )
+
+            if (batteryHealth != "UNKNOWN") {
+                survivalUpdate["batteryHealth"] = batteryHealth
+            }
+
+            firestore.collection("families").document(familyId)
+                .update(survivalUpdate)
+                .addOnSuccessListener {
+                    Log.d(TAG, "✅ Survival signal + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                }
+                .addOnFailureListener { Log.e(TAG, "Failed to update survival signal") }
+        }
+
+        // Update GPS location with battery data
+        val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
+        if (locationEnabled) {
+            val location = getCurrentLocation(context)
+            if (location != null) {
+                val locationData = mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude,
+                    "accuracy" to location.accuracy,
+                    "timestamp" to FieldValue.serverTimestamp(),
+                    "provider" to (location.provider ?: "unknown")
+                )
+
+                val gpsUpdate = mutableMapOf<String, Any>(
+                    "location" to locationData,
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
+                if (batteryHealth != "UNKNOWN") {
+                    gpsUpdate["batteryHealth"] = batteryHealth
+                }
+
+                firestore.collection("families").document(familyId)
+                    .update(gpsUpdate)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ GPS location + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
+                    .addOnFailureListener { Log.e(TAG, "Failed to update GPS location") }
+            } else {
+                // Update battery even without location
+                val debugUpdate = mutableMapOf<String, Any>(
+                    "lastGpsCheck" to FieldValue.serverTimestamp(),
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
+                if (batteryHealth != "UNKNOWN") {
+                    debugUpdate["batteryHealth"] = batteryHealth
+                }
+
+                firestore.collection("families").document(familyId)
+                    .update(debugUpdate)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ Battery updated on unlock (no location). Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
+            }
+        }
+
+    } catch (e: Exception) {
+        Log.e(TAG, "Error updating Firebase: ${e.message}")
+    }
+}
+```
+
+**Why this matters:**
+- ✅ **CRITICAL FIX:** Works even when app is COMPLETELY TERMINATED
+- ✅ Registered in `AndroidManifest.xml` - receives `ACTION_USER_PRESENT` broadcast
+- ✅ Screen unlock is the strongest signal of user activity
+- ✅ Now ALL update mechanisms send battery data consistently
+
+### Step 5: Add Battery Method Channel (Flutter Bridge)
 
 **File:** `android/app/src/main/kotlin/com/thousandemfla/thanks_everyday/MainActivity.kt`
 
@@ -376,7 +567,7 @@ Add to the method channel handler:
 }
 ```
 
-### Step 5: Create Flutter Battery Service
+### Step 6: Create Flutter Battery Service
 
 **File:** `lib/services/battery_service.dart`
 
@@ -448,7 +639,7 @@ class BatteryService {
 }
 ```
 
-### Step 6: Update FirebaseService to Send Battery
+### Step 7: Update FirebaseService to Send Battery
 
 **File:** `lib/services/firebase_service.dart`
 
@@ -502,7 +693,7 @@ Future<bool> updatePhoneActivity({bool forceImmediate = false}) async {
 }
 ```
 
-### Step 7: Display Battery in Parent App (Optional)
+### Step 8: Display Battery in Parent App (Optional)
 
 **File:** `lib/screens/settings_screen.dart`
 
@@ -1077,7 +1268,9 @@ Track battery degradation over time:
 **Parent App:**
 - [ ] Add `BATTERY_STATS` permission to AndroidManifest.xml
 - [ ] Create `BatteryService.kt`
-- [ ] Update `AlarmUpdateReceiver.kt` to include battery
+- [ ] Update `AlarmUpdateReceiver.kt` to include battery (15-min intervals - works when terminated)
+- [ ] Update `ScreenMonitorService.kt` to include battery (screen unlock - when service running)
+- [ ] Update `ScreenStateReceiver.kt` to include battery (screen unlock - **WORKS EVEN WHEN TERMINATED!**)
 - [ ] Create `battery_service.dart` (Flutter)
 - [ ] Update `firebase_service.dart` to send battery
 - [ ] (Optional) Display battery in settings screen
@@ -1091,7 +1284,9 @@ Track battery degradation over time:
 
 **Testing:**
 - [ ] Test battery reading in parent app
-- [ ] Verify Firebase updates with battery info
+- [ ] Verify Firebase updates with battery info (15-min alarms - works when terminated)
+- [ ] Verify Firebase updates on screen unlock events (ScreenMonitorService - when running)
+- [ ] **CRITICAL:** Verify screen unlock sends battery even when app is FORCE STOPPED (ScreenStateReceiver)
 - [ ] Test real-time updates in child app
 - [ ] Test all battery level ranges (0-100%)
 - [ ] Test charging/not charging states
@@ -1106,8 +1301,12 @@ Track battery degradation over time:
 
 ---
 
-**Document Version:** 1.0
-**Date:** 2025-10-26
-**Status:** Implementation Guide
+**Document Version:** 1.2
+**Date:** 2025-10-29
+**Status:** Implementation Guide (Complete - All update mechanisms now send battery data)
 **Estimated Implementation Time:** 2-3 hours
 **Cost Impact:** $0 (no additional Firebase cost)
+**Changelog:**
+- v1.2 (2025-10-29): Added Step 4B - ScreenStateReceiver now sends battery on screen unlock **EVEN WHEN APP IS TERMINATED**
+- v1.1 (2025-10-29): Added Step 4A - Battery data now sent on screen unlock events via ScreenMonitorService
+- v1.0 (2025-10-26): Initial implementation guide

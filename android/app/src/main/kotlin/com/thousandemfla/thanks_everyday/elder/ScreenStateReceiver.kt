@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.thousandemfla.thanks_everyday.services.BatteryService
 
 class ScreenStateReceiver : BroadcastReceiver() {
     
@@ -33,24 +34,43 @@ class ScreenStateReceiver : BroadcastReceiver() {
         try {
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val familyId = prefs.getString("flutter.family_id", null) ?: prefs.getString("family_id", null)
-            
+
             if (familyId.isNullOrEmpty()) {
                 Log.w(TAG, "No family ID found")
                 return
             }
-            
+
             val firestore = FirebaseFirestore.getInstance()
-            
-            // Update survival signal
+
+            // Get battery info (used for both survival and GPS updates)
+            val batteryInfo = BatteryService.getBatteryInfo(context)
+            val batteryLevel = batteryInfo["batteryLevel"] as Int
+            val isCharging = batteryInfo["isCharging"] as Boolean
+            val batteryHealth = batteryInfo["batteryHealth"] as String
+
+            // Update survival signal with battery data
             val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
             if (survivalEnabled) {
+                val survivalUpdate = mutableMapOf<String, Any>(
+                    "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
+                if (batteryHealth != "UNKNOWN") {
+                    survivalUpdate["batteryHealth"] = batteryHealth
+                }
+
                 firestore.collection("families").document(familyId)
-                    .update("lastPhoneActivity", FieldValue.serverTimestamp())
-                    .addOnSuccessListener { Log.d(TAG, "✅ Survival signal updated") }
+                    .update(survivalUpdate)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ Survival signal + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
                     .addOnFailureListener { Log.e(TAG, "Failed to update survival signal") }
             }
             
-            // Update GPS location - ALWAYS update even if location is null
+            // Update GPS location with battery data - ALWAYS update even if location is null
             val locationEnabled = prefs.getBoolean("flutter.location_tracking_enabled", false)
             if (locationEnabled) {
                 val location = getCurrentLocation(context)
@@ -62,17 +82,44 @@ class ScreenStateReceiver : BroadcastReceiver() {
                         "timestamp" to FieldValue.serverTimestamp(),
                         "provider" to (location.provider ?: "unknown")
                     )
-                    
+
+                    val gpsUpdate = mutableMapOf<String, Any>(
+                        "location" to locationData,
+                        "batteryLevel" to batteryLevel,
+                        "isCharging" to isCharging,
+                        "batteryTimestamp" to FieldValue.serverTimestamp()
+                    )
+
+                    if (batteryHealth != "UNKNOWN") {
+                        gpsUpdate["batteryHealth"] = batteryHealth
+                    }
+
                     firestore.collection("families").document(familyId)
-                        .update(mapOf("location" to locationData))
-                        .addOnSuccessListener { Log.d(TAG, "✅ GPS location updated") }
+                        .update(gpsUpdate)
+                        .addOnSuccessListener {
+                            Log.d(TAG, "✅ GPS location + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                        }
                         .addOnFailureListener { Log.e(TAG, "Failed to update GPS location") }
                 } else {
-                    // CRITICAL FIX: Update timestamp even without location (like AlarmUpdateReceiver)
-                    Log.w(TAG, "⚠️ No GPS location available on unlock - updating timestamp")
+                    // CRITICAL FIX: Update timestamp + battery even without location (like AlarmUpdateReceiver)
+                    Log.w(TAG, "⚠️ No GPS location available on unlock - updating battery data")
+                    val debugUpdate = mutableMapOf<String, Any>(
+                        "lastGpsCheck" to FieldValue.serverTimestamp(),
+                        "gpsStatus" to "location_unavailable",
+                        "batteryLevel" to batteryLevel,
+                        "isCharging" to isCharging,
+                        "batteryTimestamp" to FieldValue.serverTimestamp()
+                    )
+
+                    if (batteryHealth != "UNKNOWN") {
+                        debugUpdate["batteryHealth"] = batteryHealth
+                    }
+
                     firestore.collection("families").document(familyId)
-                        .update("lastGpsCheck", FieldValue.serverTimestamp())
-                        .addOnSuccessListener { Log.d(TAG, "✅ GPS timestamp updated on unlock") }
+                        .update(debugUpdate)
+                        .addOnSuccessListener {
+                            Log.d(TAG, "✅ GPS timestamp + battery updated on unlock (no location). Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                        }
                         .addOnFailureListener { Log.e(TAG, "Failed to update GPS timestamp") }
                 }
             }

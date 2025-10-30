@@ -92,28 +92,42 @@ class _SettingsScreenState extends State<SettingsScreen>
 
       // Get alert hours ONLY from Firebase (primary source)
       int alertHours = 12; // default fallback
-      if (_firebaseService.familyCode != null) {
+
+      // FIXED: Try familyId first (faster, works after account recovery)
+      // Fall back to familyCode if familyId not available
+      Map<String, dynamic>? familyInfo;
+
+      if (_firebaseService.familyId != null) {
         try {
-          final familyInfo = await _firebaseService.getFamilyInfo(_firebaseService.familyCode!);
-          if (familyInfo != null) {
-            // Check if settings exist in the family info
-            if (familyInfo['settings'] != null) {
-              final settings = familyInfo['settings'] as Map<String, dynamic>;
-              alertHours = settings['alertHours'] ?? 12;
-            } else if (familyInfo['alertHours'] != null) {
-              // Backward compatibility - check direct field
-              alertHours = familyInfo['alertHours'] as int;
-            }
-            AppLogger.info('Loaded alert hours from Firebase: $alertHours', tag: 'SettingsScreen');
-          } else {
-            AppLogger.warning('No family info found in Firebase, using default: 12', tag: 'SettingsScreen');
-          }
+          AppLogger.info('Loading family info by ID: ${_firebaseService.familyId}', tag: 'SettingsScreen');
+          familyInfo = await _firebaseService.getFamilyInfoById(_firebaseService.familyId!);
         } catch (e) {
-          AppLogger.error('Failed to fetch alert hours from Firebase: $e', tag: 'SettingsScreen');
-          AppLogger.info('Using default alert hours: 12', tag: 'SettingsScreen');
+          AppLogger.error('Failed to load by familyId: $e', tag: 'SettingsScreen');
         }
+      }
+
+      // Fallback to connection code if familyId didn't work
+      if (familyInfo == null && _firebaseService.familyCode != null) {
+        try {
+          AppLogger.info('Loading family info by connection code: ${_firebaseService.familyCode}', tag: 'SettingsScreen');
+          familyInfo = await _firebaseService.getFamilyInfo(_firebaseService.familyCode!);
+        } catch (e) {
+          AppLogger.error('Failed to load by familyCode: $e', tag: 'SettingsScreen');
+        }
+      }
+
+      // Extract alert hours from family info
+      if (familyInfo != null) {
+        if (familyInfo['settings'] != null) {
+          final settings = familyInfo['settings'] as Map<String, dynamic>;
+          alertHours = settings['alertHours'] ?? 12;
+        } else if (familyInfo['alertHours'] != null) {
+          // Backward compatibility - check direct field
+          alertHours = familyInfo['alertHours'] as int;
+        }
+        AppLogger.info('Loaded alert hours from Firebase: $alertHours', tag: 'SettingsScreen');
       } else {
-        AppLogger.warning('No family code found, using default alert hours: 12', tag: 'SettingsScreen');
+        AppLogger.warning('No family info found in Firebase, using default: 12', tag: 'SettingsScreen');
       }
 
       setState(() {
@@ -314,6 +328,9 @@ class _SettingsScreenState extends State<SettingsScreen>
 
           if (success) {
             AppLogger.info('Firebase settings updated successfully', tag: 'SettingsScreen');
+            // Reload settings from Firebase to confirm the update
+            await Future.delayed(const Duration(milliseconds: 500));
+            await _loadSettings();
           } else {
             AppLogger.warning('Firebase settings update failed', tag: 'SettingsScreen');
           }
@@ -507,7 +524,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                 child: Column(
                   children: [
                     const Text(
-                      '식사 기록 앱',
+                      '식사하셨어요?',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -1169,7 +1186,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         Color subtitleColor;
 
         if (_locationTrackingEnabled && hasPermission) {
-          subtitle = '위치 정보를 자녀에게 공유 (10분마다)';
+          subtitle = '위치 정보를 자녀에게 공유 (15분마다)';
           subtitleColor = const Color(0xFF10B981);
         } else if (_locationTrackingEnabled && !hasPermission) {
           subtitle = '⚠️ "항상 허용" 권한이 필요합니다';
@@ -1273,7 +1290,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           content: const Text(
             'GPS 위치 추적이 제대로 작동하려면 "항상 허용" 권한이 필요합니다.\n\n'
             '설정에서 위치 권한을 "항상 허용"으로 변경해주세요.\n\n'
-            '앱이 백그라운드에서도 2분마다 위치를 자녀에게 전송할 수 있습니다.',
+            '앱이 백그라운드에서도 15분마다 위치를 자녀에게 전송할 수 있습니다.',
           ),
           actions: [
             TextButton(
