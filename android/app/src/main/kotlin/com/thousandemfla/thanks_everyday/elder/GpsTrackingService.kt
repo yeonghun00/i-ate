@@ -20,6 +20,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import com.thousandemfla.thanks_everyday.R
 import com.google.firebase.firestore.FirebaseFirestore
+import com.thousandemfla.thanks_everyday.services.EncryptionHelper
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GpsTrackingService : Service() {
@@ -281,35 +282,50 @@ class GpsTrackingService : Service() {
                 familyId = prefs.getString("family_id", null)
                 Log.d(TAG, "🔄 Using fallback key 'family_id': $familyId")
             }
-            
+
             if (familyId.isNullOrEmpty()) {
                 Log.w(TAG, "⚠️ No family ID found, skipping Firebase update")
                 return
             }
-            
+
+            Log.d(TAG, "🔐 Encrypting location before Firebase update...")
+
+            // SECURITY FIX: Derive encryption key from familyId
+            val encryptionKey = EncryptionHelper.deriveEncryptionKey(familyId)
+
+            // SECURITY FIX: Encrypt location data before storing
+            val encryptedData = EncryptionHelper.encryptLocation(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                address = "", // Address can be added later if needed
+                base64Key = encryptionKey
+            )
+
             val db = FirebaseFirestore.getInstance()
-            // Update main document location field (optimized schema - clean data only)
+
+            // Update with ENCRYPTED location field (NOT plain coordinates!)
             val locationUpdate = mapOf(
                 "location" to mapOf(
-                    "latitude" to location.latitude,
-                    "longitude" to location.longitude,
-                    "timestamp" to com.google.firebase.Timestamp.now(),
-                    "address" to "" // Address can be added later if needed
+                    "encrypted" to encryptedData["encrypted"],
+                    "iv" to encryptedData["iv"],
+                    "timestamp" to com.google.firebase.Timestamp.now()
                 )
             )
-            
+
             db.collection("families").document(familyId)
                 .update(locationUpdate)
                 .addOnSuccessListener {
-                    Log.d(TAG, "✅ Location uploaded to Firebase successfully")
+                    Log.d(TAG, "✅ ENCRYPTED location uploaded to Firebase successfully")
+                    Log.d(TAG, "🔐 Location: ${location.latitude}, ${location.longitude} (encrypted)")
                     updateNotification("최근 업데이트: ${java.text.SimpleDateFormat("HH:mm").format(java.util.Date())}")
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "❌ Failed to upload location to Firebase: ${e.message}")
+                    Log.e(TAG, "❌ Failed to upload encrypted location to Firebase: ${e.message}")
                 }
-            
+
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error updating Firebase: ${e.message}")
+            Log.e(TAG, "❌ Error updating Firebase with encrypted location: ${e.message}")
+            Log.e(TAG, "Stack trace: ${e.stackTraceToString()}")
         }
     }
     

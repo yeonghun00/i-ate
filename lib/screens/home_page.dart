@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:thanks_everyday/core/constants/app_constants.dart';
 import 'package:thanks_everyday/core/state/app_state.dart';
 import 'package:thanks_everyday/core/utils/app_logger.dart';
@@ -98,8 +99,16 @@ class _HomePageState extends State<HomePage> with AppLogger {
 
   Future<void> _updateActivityInFirebase() async {
     try {
-      await _firebaseService.updatePhoneActivity(forceImmediate: true);
-      AppLogger.info('Phone activity updated in Firebase');
+      // SECURITY FIX: Only update activity if survival signal is enabled
+      final prefs = await SharedPreferences.getInstance();
+      final survivalEnabled = prefs.getBool('survival_signal_enabled') ?? false;
+
+      if (survivalEnabled) {
+        await _firebaseService.updatePhoneActivity(forceImmediate: true);
+        AppLogger.info('Phone activity updated in Firebase (survival signal enabled)');
+      } else {
+        AppLogger.info('Skipping phone activity update - survival signal is disabled');
+      }
     } catch (e) {
       AppLogger.error('Failed to update phone activity', error: e);
     }

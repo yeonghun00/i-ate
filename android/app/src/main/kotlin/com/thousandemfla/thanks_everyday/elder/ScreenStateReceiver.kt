@@ -7,6 +7,7 @@ import android.util.Log
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.thousandemfla.thanks_everyday.services.BatteryService
+import com.thousandemfla.thanks_everyday.services.EncryptionHelper
 
 class ScreenStateReceiver : BroadcastReceiver() {
     
@@ -77,16 +78,25 @@ class ScreenStateReceiver : BroadcastReceiver() {
             if (locationEnabled) {
                 val location = getCurrentLocation(context)
                 if (location != null) {
-                    val locationData = mapOf(
-                        "latitude" to location.latitude,
-                        "longitude" to location.longitude,
-                        "accuracy" to location.accuracy,
-                        "timestamp" to FieldValue.serverTimestamp(),
-                        "provider" to (location.provider ?: "unknown")
+                    Log.d(TAG, "🔐 Encrypting location before Firebase update (screen unlock)...")
+
+                    // SECURITY FIX: Derive encryption key from familyId
+                    val encryptionKey = EncryptionHelper.deriveEncryptionKey(familyId)
+
+                    // SECURITY FIX: Encrypt location data before storing
+                    val encryptedData = EncryptionHelper.encryptLocation(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        address = "",
+                        base64Key = encryptionKey
                     )
 
                     val gpsUpdate = mutableMapOf<String, Any>(
-                        "location" to locationData,
+                        "location" to mapOf(
+                            "encrypted" to encryptedData["encrypted"]!!,
+                            "iv" to encryptedData["iv"]!!,
+                            "timestamp" to FieldValue.serverTimestamp()
+                        ),
                         "batteryLevel" to batteryLevel,
                         "isCharging" to isCharging,
                         "batteryTimestamp" to FieldValue.serverTimestamp()
@@ -99,9 +109,10 @@ class ScreenStateReceiver : BroadcastReceiver() {
                     firestore.collection("families").document(familyId)
                         .update(gpsUpdate)
                         .addOnSuccessListener {
-                            Log.d(TAG, "✅ GPS location + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                            Log.d(TAG, "✅ ENCRYPTED GPS location + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                            Log.d(TAG, "🔐 Location: ${location.latitude}, ${location.longitude} (encrypted)")
                         }
-                        .addOnFailureListener { Log.e(TAG, "Failed to update GPS location") }
+                        .addOnFailureListener { Log.e(TAG, "Failed to update encrypted GPS location") }
                 } else {
                     // CRITICAL FIX: Update timestamp + battery even without location (like AlarmUpdateReceiver)
                     Log.w(TAG, "⚠️ No GPS location available on unlock - updating battery data")

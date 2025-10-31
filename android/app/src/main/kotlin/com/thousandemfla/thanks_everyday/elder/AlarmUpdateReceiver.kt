@@ -17,6 +17,7 @@ import android.util.Log
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.thousandemfla.thanks_everyday.services.BatteryService
+import com.thousandemfla.thanks_everyday.services.EncryptionHelper
 
 class AlarmUpdateReceiver : BroadcastReceiver() {
     
@@ -569,17 +570,25 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             val batteryInfo = BatteryService.getBatteryInfo(context)
 
             if (location != null) {
-                val locationData = mapOf(
-                    "latitude" to location.latitude,
-                    "longitude" to location.longitude,
-                    "accuracy" to location.accuracy,
-                    "timestamp" to FieldValue.serverTimestamp(),
-                    "provider" to (location.provider ?: "unknown"),
-                    "address" to "" // Keep existing address field
+                Log.d(TAG, "🔐 Encrypting location before Firebase update (alarm)...")
+
+                // SECURITY FIX: Derive encryption key from familyId
+                val encryptionKey = EncryptionHelper.deriveEncryptionKey(familyId)
+
+                // SECURITY FIX: Encrypt location data before storing
+                val encryptedData = EncryptionHelper.encryptLocation(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    address = "", // Keep existing address field
+                    base64Key = encryptionKey
                 )
 
                 val updateData = mutableMapOf<String, Any>(
-                    "location" to locationData,
+                    "location" to mapOf(
+                        "encrypted" to encryptedData["encrypted"]!!,
+                        "iv" to encryptedData["iv"]!!,
+                        "timestamp" to FieldValue.serverTimestamp()
+                    ),
                     "batteryLevel" to batteryInfo["batteryLevel"]!!,
                     "isCharging" to batteryInfo["isCharging"]!!,
                     "batteryHealth" to batteryInfo["batteryHealth"]!!,
@@ -591,10 +600,10 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                     .addOnSuccessListener {
                         val batteryLevel = batteryInfo["batteryLevel"] as Int
                         val isCharging = batteryInfo["isCharging"] as Boolean
-                        Log.i(TAG, "✅ GPS location updated in Firebase: ${location.latitude}, ${location.longitude} | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                        Log.i(TAG, "✅ ENCRYPTED GPS location updated in Firebase: ${location.latitude}, ${location.longitude} (encrypted) | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "❌ Failed to update GPS location in Firebase: ${e.message}")
+                        Log.e(TAG, "❌ Failed to update encrypted GPS location in Firebase: ${e.message}")
                     }
             } else {
                 // ENHANCED: Don't update Firebase with null coordinates - preserve existing location

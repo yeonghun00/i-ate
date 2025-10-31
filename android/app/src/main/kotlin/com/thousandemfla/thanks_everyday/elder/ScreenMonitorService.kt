@@ -17,6 +17,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.thousandemfla.thanks_everyday.R
 import com.thousandemfla.thanks_everyday.services.BatteryService
+import com.thousandemfla.thanks_everyday.services.EncryptionHelper
 
 class ScreenMonitorService : Service() {
     
@@ -604,29 +605,36 @@ class ScreenMonitorService : Service() {
             // Update Firebase with location data (same structure as AlarmUpdateReceiver)
             if (location != null) {
                 val firestore = FirebaseFirestore.getInstance()
-                
-                val locationData = mapOf(
-                    "latitude" to location.latitude,
-                    "longitude" to location.longitude,
-                    "accuracy" to location.accuracy,
-                    "timestamp" to FieldValue.serverTimestamp(),
-                    "provider" to location.provider,
-                    "speed" to if (location.hasSpeed()) location.speed else null,
-                    "altitude" to if (location.hasAltitude()) location.altitude else null
+
+                Log.d(TAG, "🔐 SERVICE: Encrypting location before Firebase update...")
+
+                // SECURITY FIX: Derive encryption key from familyId
+                val encryptionKey = EncryptionHelper.deriveEncryptionKey(familyId)
+
+                // SECURITY FIX: Encrypt location data before storing
+                val encryptedData = EncryptionHelper.encryptLocation(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    address = "",
+                    base64Key = encryptionKey
                 )
-                
+
                 val data = mapOf(
-                    "location" to locationData
+                    "location" to mapOf(
+                        "encrypted" to encryptedData["encrypted"]!!,
+                        "iv" to encryptedData["iv"]!!,
+                        "timestamp" to FieldValue.serverTimestamp()
+                    )
                 )
-                
+
                 firestore.collection("families").document(familyId)
                     .update(data)
                     .addOnSuccessListener {
-                        Log.d(TAG, "✅✅✅ SERVICE: IMMEDIATE GPS UPDATE SUCCESS - Location updated on screen unlock!")
-                        Log.d(TAG, "🎯 SERVICE: GPS coordinates: ${location.latitude}, ${location.longitude}")
+                        Log.d(TAG, "✅✅✅ SERVICE: IMMEDIATE ENCRYPTED GPS UPDATE SUCCESS - Location updated on screen unlock!")
+                        Log.d(TAG, "🎯 SERVICE: GPS coordinates: ${location.latitude}, ${location.longitude} (encrypted)")
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "❌ SERVICE: Immediate GPS update failed: ${e.message}")
+                        Log.e(TAG, "❌ SERVICE: Immediate encrypted GPS update failed: ${e.message}")
                     }
             } else {
                 Log.d(TAG, "⚠️ SERVICE: No location available for immediate GPS update")

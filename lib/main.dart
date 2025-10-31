@@ -380,9 +380,16 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _updateActivityInFirebase() async {
     try {
-      // CRITICAL FIX: Force immediate activity update when app opens
-      await _firebaseService.updatePhoneActivity(forceImmediate: true);
-      AppLogger.info('App is active - phone activity FORCE updated in Firebase', tag: 'HomePage');
+      // SECURITY FIX: Only update activity if survival signal is enabled
+      final prefs = await SharedPreferences.getInstance();
+      final survivalEnabled = prefs.getBool('survival_signal_enabled') ?? false;
+
+      if (survivalEnabled) {
+        await _firebaseService.updatePhoneActivity(forceImmediate: true);
+        AppLogger.info('App is active - phone activity FORCE updated in Firebase (survival signal enabled)', tag: 'HomePage');
+      } else {
+        AppLogger.info('Skipping phone activity update - survival signal is disabled', tag: 'HomePage');
+      }
     } catch (e) {
       AppLogger.warning('Failed to update phone activity: $e', tag: 'HomePage');
     }
@@ -404,12 +411,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _initializeServices() async {
+    // SECURITY FIX: Declare survivalEnabled outside try block so it can be used later
+    bool survivalEnabled = false;
+    bool locationEnabled = false;
+
     try {
       AppLogger.info('🔧 Starting service initialization with Firebase sync...', tag: 'HomePage');
-      
+
       // CRITICAL FIX: Get settings from Firebase first, fallback to SharedPreferences
-      bool survivalEnabled = false;
-      bool locationEnabled = false;
       
       // Try to get settings from Firebase first
       if (_firebaseService.familyCode != null) {
@@ -487,14 +496,20 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       AppLogger.error('❌ Service initialization failed: $e', tag: 'HomePage');
     }
-    
-    // CRITICAL FIX: Always update general activity regardless of service settings
-    try {
-      AppLogger.info('📱 Updating general phone activity...', tag: 'HomePage');
-      await _firebaseService.updatePhoneActivity(forceImmediate: true);
-      AppLogger.info('✅ General phone activity updated', tag: 'HomePage');
-    } catch (e) {
-      AppLogger.error('❌ Failed to update general phone activity: $e', tag: 'HomePage');
+
+    // SECURITY FIX: Only update activity if survival signal is enabled
+    // Removed: "Always update general activity regardless of service settings"
+    // This was causing activity updates even when user disabled survival signal
+    if (survivalEnabled) {
+      try {
+        AppLogger.info('📱 Updating general phone activity (survival signal enabled)...', tag: 'HomePage');
+        await _firebaseService.updatePhoneActivity(forceImmediate: true);
+        AppLogger.info('✅ General phone activity updated', tag: 'HomePage');
+      } catch (e) {
+        AppLogger.error('❌ Failed to update general phone activity: $e', tag: 'HomePage');
+      }
+    } else {
+      AppLogger.info('⏸️ Skipping general phone activity update - survival signal is disabled', tag: 'HomePage');
     }
   }
 

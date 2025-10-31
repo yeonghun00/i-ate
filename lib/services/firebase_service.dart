@@ -254,9 +254,16 @@ class FirebaseService {
         return false;
       }
 
-      // CRITICAL FIX: Force immediate activity update before meal recording
-      AppLogger.info('Forcing immediate activity update before meal recording', tag: 'FirebaseService');
-      await updatePhoneActivity(forceImmediate: true);
+      // SECURITY FIX: Only update activity if survival signal is enabled
+      // Check survival signal setting before force update
+      final survivalEnabled = await _storage.getBool('survival_signal_enabled') ?? false;
+
+      if (survivalEnabled) {
+        AppLogger.info('Forcing immediate activity update before meal recording (survival signal enabled)', tag: 'FirebaseService');
+        await updatePhoneActivity(forceImmediate: true);
+      } else {
+        AppLogger.info('Skipping activity update before meal recording - survival signal is disabled', tag: 'FirebaseService');
+      }
 
       // Get today's date string
       final today = DateTime.now();

@@ -26,6 +26,7 @@ import com.thousandemfla.thanks_everyday.elder.EnhancedUsageMonitor
 import com.thousandemfla.thanks_everyday.elder.MiuiPermissionHelper
 import com.thousandemfla.thanks_everyday.elder.AlternativeBootDetector
 import com.thousandemfla.thanks_everyday.services.BatteryService
+import com.thousandemfla.thanks_everyday.services.EncryptionHelper
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.thousandemfla.thanks_everyday/screen_monitor"
@@ -43,10 +44,20 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
+        // SECURITY TEST: Test encryption implementation on app startup
+        // This verifies that Kotlin encryption matches Flutter encryption
+        try {
+            Log.d(TAG, "🔐 Running encryption compatibility test...")
+            EncryptionHelper.testEncryption()
+            Log.d(TAG, "✅ Encryption test completed - check logs for results")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Encryption test failed: ${e.message}")
+        }
+
         // CRITICAL FIX: Check for alternative boot detection on app launch
         checkAlternativeBootOnAppLaunch()
-        
+
         // CRITICAL FIX: Ensure survival monitoring is restored on app startup
         // This handles cases where app was killed and user opens it again
         restoreMonitoringOnStartup()
