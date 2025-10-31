@@ -331,6 +331,7 @@ class _PostRecoverySettingsScreenState extends State<PostRecoverySettingsScreen>
         familyContact: '',
         alertHours: null, // Keep existing alertHours from Firebase
         sleepTimeSettings: sleepSettings,
+        locationTrackingEnabled: _locationTrackingEnabled,  // Child app can see GPS status
       );
 
       if (!settingsUpdated) {

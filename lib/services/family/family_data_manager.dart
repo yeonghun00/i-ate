@@ -83,15 +83,22 @@ class FamilyDataManager {
     required String familyContact,
     int? alertHours,
     Map<String, dynamic>? sleepTimeSettings,
+    bool? locationTrackingEnabled,  // Child app can see if GPS is enabled
   }) async {
     try {
       AppLogger.info('Updating family settings for ID: $familyId', tag: 'FamilyDataManager');
-      
+
       final updateData = <String, dynamic>{
         'settings.survivalSignalEnabled': survivalSignalEnabled,
         'settings.familyContact': familyContact,
         'settings.alertHours': alertHours ?? 12,
       };
+
+      // Add location tracking status if provided
+      if (locationTrackingEnabled != null) {
+        updateData['settings.locationTrackingEnabled'] = locationTrackingEnabled;
+        AppLogger.info('Updating location tracking status: $locationTrackingEnabled', tag: 'FamilyDataManager');
+      }
 
       // Add sleep settings if provided, or explicitly disable if null
       if (sleepTimeSettings != null) {

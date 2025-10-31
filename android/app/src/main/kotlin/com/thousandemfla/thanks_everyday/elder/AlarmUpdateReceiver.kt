@@ -507,18 +507,8 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 return
             }
 
-            // Check if it's currently sleep time (use centralized helper)
-            if (SleepTimeHelper.isCurrentlySleepTime(context)) {
-                Log.d(TAG, "😴 Currently in sleep period - skipping survival signal, but updating battery")
-                // During sleep: Update battery ONLY, skip survival signal
-                updateFirebaseWithBatteryOnly(context)
-                // Still record execution and schedule next alarm
-                recordAlarmExecution(context, "survival")
-                scheduleSurvivalAlarm(context)
-                return
-            }
-
-            // Check screen state and update Firebase (survival signal + battery)
+            // ALWAYS update survival signal - Firebase Function handles alert suppression during sleep
+            // This ensures lastPhoneActivity is always fresh, preventing false alarms after sleep
             checkScreenStateAndUpdateFirebase(context)
 
             // Record execution and schedule next alarm
@@ -677,50 +667,6 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             Log.e(TAG, "❌ Error updating survival signal: ${e.message}")
         }
     }
-
-    /**
-     * Update Firebase with battery info ONLY (during sleep time)
-     * Does NOT update lastPhoneActivity to prevent false survival signals
-     */
-    private fun updateFirebaseWithBatteryOnly(context: Context) {
-        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val familyId = prefs.getString("flutter.family_id", null)
-            ?: prefs.getString("family_id", null)
-
-        if (familyId.isNullOrEmpty()) {
-            Log.e(TAG, "❌ No family ID found for battery update")
-            return
-        }
-
-        try {
-            val db = FirebaseFirestore.getInstance()
-
-            // Get battery info
-            val batteryInfo = BatteryService.getBatteryInfo(context)
-
-            // Update ONLY battery info, NOT lastPhoneActivity
-            val updateData = mapOf(
-                "batteryLevel" to batteryInfo["batteryLevel"]!!,
-                "isCharging" to batteryInfo["isCharging"]!!,
-                "batteryHealth" to batteryInfo["batteryHealth"]!!,
-                "batteryTimestamp" to FieldValue.serverTimestamp()
-            )
-
-            db.collection("families").document(familyId)
-                .update(updateData)
-                .addOnSuccessListener {
-                    val batteryLevel = batteryInfo["batteryLevel"] as Int
-                    val isCharging = batteryInfo["isCharging"] as Boolean
-                    Log.d(TAG, "✅ Battery info updated during sleep time | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "❌ Failed to update battery info: ${e.message}")
-                }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error updating battery info: ${e.message}")
-        }
-    }
-    
 
     /**
      * Get current location from LocationManager with enhanced error handling and fresh location request

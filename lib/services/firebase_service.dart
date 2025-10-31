@@ -165,6 +165,7 @@ class FirebaseService {
         'memberIds': [currentUserId],
         'settings': {
           'survivalSignalEnabled': false,
+          'locationTrackingEnabled': false,  // Child app can see if GPS is enabled
           'familyContact': '',
           'alertHours': 12,
         },
@@ -404,6 +405,7 @@ class FirebaseService {
     required String familyContact,
     int? alertHours,
     Map<String, dynamic>? sleepTimeSettings,
+    bool? locationTrackingEnabled,  // Child app can see if GPS is enabled
   }) async {
     if (_familyId == null) {
       AppLogger.warning('Cannot update family settings: no family ID', tag: 'FirebaseService');
@@ -416,6 +418,7 @@ class FirebaseService {
       familyContact: familyContact,
       alertHours: alertHours,
       sleepTimeSettings: sleepTimeSettings,
+      locationTrackingEnabled: locationTrackingEnabled,
     );
   }
 
@@ -650,22 +653,15 @@ class FirebaseService {
       // Get battery info
       final batteryInfo = await BatteryService.getBatteryInfo();
 
-      // Check if currently in sleep time
-      final isInSleepTime = await _isCurrentlySleepTime();
+      // ALWAYS update survival signal (don't check sleep time here)
+      // Firebase Function handles alert suppression during sleep
+      final updateData = <String, dynamic>{
+        'lastPhoneActivity': FieldValue.serverTimestamp(),
+        'lastActivityType': _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity',
+        'updateTimestamp': FieldValue.serverTimestamp(),
+      };
 
-      final updateData = <String, dynamic>{};
-
-      if (isInSleepTime) {
-        // During sleep time: Update ONLY battery, skip survival signal
-        AppLogger.info('😴 Currently in sleep period - skipping survival signal, updating battery only', tag: 'FirebaseService');
-      } else {
-        // Normal operation: Update survival signal
-        updateData['lastPhoneActivity'] = FieldValue.serverTimestamp();
-        updateData['lastActivityType'] = _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity';
-        updateData['updateTimestamp'] = FieldValue.serverTimestamp();
-      }
-
-      // Always add battery info if available (regardless of sleep time)
+      // Always add battery info if available
       if (batteryInfo != null) {
         updateData['batteryLevel'] = batteryInfo['batteryLevel'];
         updateData['isCharging'] = batteryInfo['isCharging'];
@@ -676,19 +672,15 @@ class FirebaseService {
       // Send update to Firebase
       await _firestore.collection('families').doc(_familyId).update(updateData);
 
-      if (!isInSleepTime) {
-        _activityBatcher.recordBatch();
-      }
+      _activityBatcher.recordBatch();
 
+      // Logging
       if (batteryInfo != null) {
         final batteryLevel = batteryInfo['batteryLevel'] as int;
         final isCharging = batteryInfo['isCharging'] as bool;
-        final statusMessage = isInSleepTime
-            ? 'Battery updated during sleep time | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}'
-            : 'Activity update sent to Firebase | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}';
-        AppLogger.info(statusMessage, tag: 'FirebaseService');
+        AppLogger.info('Activity update sent to Firebase | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}', tag: 'FirebaseService');
       } else {
-        AppLogger.info(isInSleepTime ? 'Battery update during sleep time' : 'Activity update sent to Firebase', tag: 'FirebaseService');
+        AppLogger.info('Activity update sent to Firebase', tag: 'FirebaseService');
       }
 
       return true;

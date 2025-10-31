@@ -51,46 +51,25 @@ class ScreenStateReceiver : BroadcastReceiver() {
             // Update survival signal with battery data
             val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
             if (survivalEnabled) {
-                // Check if currently in sleep time
-                if (SleepTimeHelper.isCurrentlySleepTime(context)) {
-                    Log.d(TAG, "😴 Screen unlocked during sleep time - updating battery only, skipping survival signal")
-                    // Update only battery during sleep time
-                    val batteryOnlyUpdate = mutableMapOf<String, Any>(
-                        "batteryLevel" to batteryLevel,
-                        "isCharging" to isCharging,
-                        "batteryTimestamp" to FieldValue.serverTimestamp()
-                    )
+                // ALWAYS update survival signal + battery (no sleep check)
+                // Firebase Function handles alert suppression during sleep
+                val survivalUpdate = mutableMapOf<String, Any>(
+                    "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
 
-                    if (batteryHealth != "UNKNOWN") {
-                        batteryOnlyUpdate["batteryHealth"] = batteryHealth
-                    }
-
-                    firestore.collection("families").document(familyId)
-                        .update(batteryOnlyUpdate)
-                        .addOnSuccessListener {
-                            Log.d(TAG, "✅ Battery updated (sleep time) from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
-                        }
-                        .addOnFailureListener { Log.e(TAG, "Failed to update battery") }
-                } else {
-                    // Normal operation: Update survival signal + battery
-                    val survivalUpdate = mutableMapOf<String, Any>(
-                        "lastPhoneActivity" to FieldValue.serverTimestamp(),
-                        "batteryLevel" to batteryLevel,
-                        "isCharging" to isCharging,
-                        "batteryTimestamp" to FieldValue.serverTimestamp()
-                    )
-
-                    if (batteryHealth != "UNKNOWN") {
-                        survivalUpdate["batteryHealth"] = batteryHealth
-                    }
-
-                    firestore.collection("families").document(familyId)
-                        .update(survivalUpdate)
-                        .addOnSuccessListener {
-                            Log.d(TAG, "✅ Survival signal + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
-                        }
-                        .addOnFailureListener { Log.e(TAG, "Failed to update survival signal") }
+                if (batteryHealth != "UNKNOWN") {
+                    survivalUpdate["batteryHealth"] = batteryHealth
                 }
+
+                firestore.collection("families").document(familyId)
+                    .update(survivalUpdate)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ Survival signal + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
+                    .addOnFailureListener { Log.e(TAG, "Failed to update survival signal") }
             }
             
             // Update GPS location with battery data - ALWAYS update even if location is null

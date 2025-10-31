@@ -344,6 +344,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             familyContact: _familyContact ?? '',
             alertHours: _alertHours,
             sleepTimeSettings: _sleepTimeExclusionEnabled ? _sleepTimeSettings.toMap() : null,
+            locationTrackingEnabled: _locationTrackingEnabled,  // Child app can see GPS status
           );
 
           if (success) {
@@ -381,6 +382,23 @@ class _SettingsScreenState extends State<SettingsScreen>
       await LocationService.setLocationTrackingEnabled(
         _locationTrackingEnabled,
       );
+
+      // CRITICAL: Update Firebase so child app knows GPS status
+      if (_familyCode != null) {
+        try {
+          await _firebaseService.updateFamilySettings(
+            survivalSignalEnabled: _survivalSignalEnabled,
+            familyContact: _familyContact ?? '',
+            alertHours: _alertHours,
+            sleepTimeSettings: _sleepTimeExclusionEnabled ? _sleepTimeSettings.toMap() : null,
+            locationTrackingEnabled: _locationTrackingEnabled,  // This is the critical update
+          );
+          AppLogger.info('GPS tracking status updated in Firebase: $_locationTrackingEnabled', tag: 'SettingsScreen');
+        } catch (e) {
+          AppLogger.error('Error updating GPS status in Firebase: $e', tag: 'SettingsScreen');
+          // Don't fail - local settings still saved
+        }
+      }
 
       _showMessage('위치 추적 설정이 저장되었습니다.');
     } catch (e) {

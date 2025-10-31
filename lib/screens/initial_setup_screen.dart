@@ -75,6 +75,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           familyContact: '',
           alertHours: _alertHours,
           sleepTimeSettings: sleepSettings,
+          locationTrackingEnabled: _locationTrackingEnabled,  // Child app can see GPS status
         );
         
         if (!settingsUpdated) {

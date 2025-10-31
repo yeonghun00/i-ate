@@ -93,6 +93,7 @@ await _firestore.collection('families').doc(familyId).set({
   'memberIds': [currentUserId],
   'settings': {
     'survivalSignalEnabled': false,
+    'locationTrackingEnabled': false,  // Child app can see if GPS is enabled
     'familyContact': '',
     'alertHours': 12,
     'sleepTimeSettings': {
@@ -164,6 +165,7 @@ await _firestore.collection('families').doc(familyId).update({
 ```json
 {
   "settings.survivalSignalEnabled": true/false,
+  "settings.locationTrackingEnabled": true/false,  // Child app can see GPS status
   "settings.familyContact": "",
   "settings.alertHours": 12,
   "settings.sleepTimeSettings": {
@@ -915,7 +917,8 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
   "memberIds": ["user_id"],
   
   "settings": {
-    "survivalSignalEnabled": true/false,
+    "survivalSignalEnabled": true/false,  // Parent enabled/disabled survival signal monitoring
+    "locationTrackingEnabled": true/false,  // Parent enabled/disabled GPS tracking (child app needs this!)
     "familyContact": "",
     "alertHours": 12,
     "sleepTimeSettings": {
@@ -1068,11 +1071,16 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
 ## Sleep Time Exclusion Feature
 
 ### Overview
-Sleep time exclusion prevents false survival alerts during configured sleep hours. When enabled, the system:
-- ✅ **CONTINUES** updating GPS location and battery status
-- ❌ **SKIPS** updating survival signal (`lastPhoneActivity`)
+Sleep time exclusion prevents false survival alerts during configured sleep hours. When enabled:
+- ✅ **ALWAYS** updates survival signal (`lastPhoneActivity`) - keeps data fresh
+- ✅ **ALWAYS** updates GPS location and battery status
+- ✅ **Firebase Function ONLY** suppresses alerts during sleep hours
 
-This allows users with short alert thresholds (e.g., 2-3 hours) to avoid false alarms during normal sleep.
+**Architecture: Data Integrity First, Alert Logic Second**
+- Data Layer (Android/Flutter): ALWAYS update `lastPhoneActivity` (no sleep checks)
+- Alert Layer (Firebase Function): Check sleep time and skip alerts only
+
+This prevents false alarms after waking up (e.g., 8-hour sleep would make data stale, triggering false alerts).
 
 ### Data Structure
 
@@ -1093,84 +1101,83 @@ settings: {
 
 **Important:** Sleep settings are stored as a **nested object** under `sleepTimeSettings`, NOT as flat fields. Always access as `settings.sleepTimeSettings.enabled`, never `settings.sleepExclusionEnabled`.
 
-### Implementation Across All Update Paths
+### Implementation - NEW ARCHITECTURE (Fixed 2025-10-31)
 
-Sleep time is checked in **5 different update paths**, all using centralized logic:
+**CRITICAL CHANGE:** Sleep time checks have been **REMOVED** from all data collection paths. Alert suppression now happens **ONLY** in Firebase Function.
 
-#### 1. Android Native Alarms (Every 2 minutes - TESTING)
-**File:** `android/.../AlarmUpdateReceiver.kt:510-519`
-**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+#### 1. Android Native Alarms (Every 2 minutes)
+**File:** `android/.../AlarmUpdateReceiver.kt:510-516`
+**NO sleep check** - Always updates survival signal ✅
 ```kotlin
-if (SleepTimeHelper.isCurrentlySleepTime(context)) {
-    Log.d(TAG, "😴 Currently in sleep period - skipping survival signal, but updating battery")
-    updateFirebaseWithBatteryOnly(context) // Battery only
-    recordAlarmExecution(context, "survival")
-    scheduleSurvivalAlarm(context)
-    return
-}
-// Normal: Update survival signal + battery
+// ALWAYS update survival signal - Firebase Function handles alert suppression during sleep
+// This ensures lastPhoneActivity is always fresh, preventing false alarms after sleep
 checkScreenStateAndUpdateFirebase(context)
+recordAlarmExecution(context, "survival")
+scheduleSurvivalAlarm(context)
 ```
 
 #### 2. Screen Unlock Events (Immediate)
-**File:** `android/.../ScreenStateReceiver.kt:54-94`
-**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+**File:** `android/.../ScreenStateReceiver.kt:54-73`
+**NO sleep check** - Always updates survival signal ✅
 ```kotlin
-if (SleepTimeHelper.isCurrentlySleepTime(context)) {
-    Log.d(TAG, "😴 Screen unlocked during sleep time - updating battery only")
-    val batteryOnlyUpdate = mutableMapOf<String, Any>(
-        "batteryLevel" to batteryLevel,
-        "isCharging" to isCharging,
-        "batteryTimestamp" to FieldValue.serverTimestamp()
-    )
-    firestore.collection("families").document(familyId).update(batteryOnlyUpdate)
-} else {
-    // Normal: Update survival signal + battery
-    val survivalUpdate = mutableMapOf<String, Any>(
-        "lastPhoneActivity" to FieldValue.serverTimestamp(),
-        "batteryLevel" to batteryLevel,
-        "isCharging" to isCharging
-    )
-    firestore.collection("families").document(familyId).update(survivalUpdate)
+// ALWAYS update survival signal + battery (no sleep check)
+// Firebase Function handles alert suppression during sleep
+val survivalUpdate = mutableMapOf<String, Any>(
+    "lastPhoneActivity" to FieldValue.serverTimestamp(),
+    "batteryLevel" to batteryLevel,
+    "isCharging" to isCharging,
+    "batteryTimestamp" to FieldValue.serverTimestamp()
+)
+if (batteryHealth != "UNKNOWN") {
+    survivalUpdate["batteryHealth"] = batteryHealth
 }
+firestore.collection("families").document(familyId).update(survivalUpdate)
 ```
 
 #### 3. Screen Events (From Service)
-**File:** `android/.../ScreenMonitorService.kt:456-501`
-**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+**File:** `android/.../ScreenMonitorService.kt:454-476`
+**NO sleep check** - Always updates survival signal ✅
 ```kotlin
-if (SleepTimeHelper.isCurrentlySleepTime(this)) {
-    Log.d(TAG, "😴 Screen event during sleep time - updating battery only")
-    // Battery only update (same as ScreenStateReceiver)
-} else {
-    // Normal: Update survival signal + battery
+// ALWAYS update survival signal + battery (no sleep check)
+// Firebase Function handles alert suppression during sleep
+val updateData = mutableMapOf<String, Any>(
+    "lastPhoneActivity" to FieldValue.serverTimestamp(),
+    "batteryLevel" to batteryLevel,
+    "isCharging" to isCharging,
+    "batteryTimestamp" to FieldValue.serverTimestamp()
+)
+if (batteryHealth != "UNKNOWN") {
+    updateData["batteryHealth"] = batteryHealth
 }
+firestore.collection("families").document(familyId).update(updateData)
 ```
 
 #### 4. Flutter Activity Updates
-**File:** `lib/services/firebase_service.dart:654-681`
-**Uses:** `_isCurrentlySleepTime()` (internal method) ✅
+**File:** `lib/services/firebase_service.dart:653-681`
+**NO sleep check** - Always updates survival signal ✅
 ```dart
-final isInSleepTime = await _isCurrentlySleepTime();
+// ALWAYS update survival signal (don't check sleep time here)
+// Firebase Function handles alert suppression during sleep
+final updateData = <String, dynamic>{
+  'lastPhoneActivity': FieldValue.serverTimestamp(),
+  'lastActivityType': _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity',
+  'updateTimestamp': FieldValue.serverTimestamp(),
+};
 
-if (isInSleepTime) {
-  AppLogger.info('😴 Currently in sleep period - skipping survival signal');
-} else {
-  updateData['lastPhoneActivity'] = FieldValue.serverTimestamp();
-  updateData['lastActivityType'] = _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity';
-}
-
-// Always add battery info (regardless of sleep time)
+// Always add battery info if available
 if (batteryInfo != null) {
   updateData['batteryLevel'] = batteryInfo['batteryLevel'];
   updateData['isCharging'] = batteryInfo['isCharging'];
+  updateData['batteryHealth'] = batteryInfo['batteryHealth'];
   updateData['batteryTimestamp'] = FieldValue.serverTimestamp();
 }
 ```
 
-#### 5. Firebase Cloud Function (Server-side)
+#### 5. Firebase Cloud Function (Server-side) - **THE ONLY PLACE TO CHECK SLEEP TIME** ✅
 **File:** `functions/index.js:237-275`
 **Uses:** `isCurrentlySleepTime(settings)` (server-side function) ✅
+
+**This is the CORRECT and ONLY place to check sleep time!**
 ```javascript
 function isCurrentlySleepTime(settings) {
   const sleepEnabled = settings?.sleepTimeSettings?.enabled;
@@ -1185,17 +1192,32 @@ function isCurrentlySleepTime(settings) {
   return currentMinutes >= sleepStartMinutes || currentMinutes < sleepEndMinutes;
 }
 
-// Called when checking if alert should be sent
+// Called when checking if alert should be sent (runs every 2 minutes)
 if (isCurrentlySleepTime(familyData.settings)) {
   console.log(`😴 ${elderlyName} is in sleep period - skipping alert`);
-  return;
+  return; // ONLY suppress alert - lastPhoneActivity is still fresh!
 }
+
+// Normal alert path - data is always fresh because collection never stopped
+console.log(`🚨 Sending survival alert to family`);
+// ... send FCM notification
 ```
 
-### Sleep Time Helper (Centralized)
+**Why this is correct:**
+- ✅ Has complete view of data (fresh `lastPhoneActivity` from continuous updates)
+- ✅ Single point of control for alert logic
+- ✅ Can be updated without redeploying mobile apps
+- ✅ Prevents false alarms after sleep (data is never stale)
+
+### Sleep Time Helper (Centralized) - ⚠️ DEPRECATED FOR DATA COLLECTION
 **File:** `android/.../SleepTimeHelper.kt`
 
-A centralized Kotlin helper for checking sleep time across all Android components:
+**⚠️ STATUS:** This helper is **NO LONGER USED** for data collection (as of 2025-10-31 architectural fix).
+- ❌ Removed from: AlarmUpdateReceiver, ScreenStateReceiver, ScreenMonitorService, firebase_service.dart
+- ⚠️ Still exists in codebase (not deleted) - may be used for UI/logging purposes
+- ✅ Sleep time checking now happens ONLY in Firebase Function
+
+A centralized Kotlin helper for checking sleep time (historical reference - no longer used in data paths):
 
 ```kotlin
 object SleepTimeHelper {
@@ -1234,31 +1256,54 @@ object SleepTimeHelper {
 }
 ```
 
-### Automatic Morning Resumption
+### Automatic Morning Resumption - NEW BEHAVIOR (Fixed 2025-10-31)
 
-Sleep time checking is **stateless** - calculated fresh on every update. This ensures automatic resumption when sleep period ends:
+**NEW:** Data collection NEVER stops. Only alert suppression happens during sleep.
 
 **Timeline Example (Sleep: 22:00-06:00):**
 ```
-05:58 → isCurrentlySleepTime() = true → Update battery only
-06:00 → isCurrentlySleepTime() = false → Resume survival signal (< operator ensures instant resumption)
-06:02 → Next alarm/event → Full survival signal update resumes
+22:00 → User sleeps
+        lastPhoneActivity: 22:00 ✅
+        Firebase Function: In sleep period → Skip alert
+
+22:02 → Alarm fires
+        lastPhoneActivity: 22:02 ✅ (ALWAYS updates!)
+        Firebase Function: In sleep period → Skip alert
+
+... (continues every 2 minutes throughout night)
+
+05:58 → Alarm fires
+        lastPhoneActivity: 05:58 ✅
+        Firebase Function: In sleep period → Skip alert
+
+06:00 → Sleep period ends
+        lastPhoneActivity: 05:58 (2 minutes ago - FRESH!)
+
+06:02 → Alarm fires + Firebase Function runs
+        lastPhoneActivity: 06:02 ✅
+        Firebase Function: NOT in sleep period → Check for alerts
+        2 minutes since last activity → No alert needed ✅
 ```
 
-**Critical Implementation Detail:** All sleep time checks use `<` (not `<=`) for the end time comparison:
-```kotlin
+**Critical Implementation Detail:** Firebase Function uses `<` (not `<=`) for end time:
+```javascript
 currentMinutes < sleepEndMinutes  // 06:00 exactly is considered awake
 ```
 
-This ensures survival signal updates resume **immediately** at 06:00, not at 06:01.
+**Result:** No false alarms after waking because data was continuously fresh during sleep!
 
-### What Continues During Sleep Time
+### What Continues During Sleep Time - NEW BEHAVIOR (Fixed 2025-10-31)
 
-Even when sleep exclusion is active:
+**EVERYTHING continues during sleep!** Only alerts are suppressed.
+
+When sleep exclusion is active:
+- ✅ **Survival signal** - `lastPhoneActivity` ALWAYS updated (prevents false alarms)
 - ✅ **GPS location updates** - Always update (for safety)
 - ✅ **Battery status updates** - Always update (for monitoring)
-- ✅ **Timestamp tracking** - `batteryTimestamp` is updated
-- ❌ **Survival signal** - `lastPhoneActivity` is NOT updated
+- ✅ **All timestamps** - `batteryTimestamp`, `updateTimestamp` updated normally
+- ❌ **Alerts to family** - ONLY thing that stops (handled by Firebase Function)
+
+**Why this is important:** Keeping `lastPhoneActivity` fresh during sleep prevents false alarms after waking. The old behavior (stopping updates) caused 8-hour data gaps, triggering false alerts when users woke up.
 
 ### Settings Persistence
 
@@ -1288,9 +1333,11 @@ await prefs.setInt('flutter.sleep_end_minute', 0);
 await prefs.setString('flutter.sleep_active_days', '1,2,3,4,5,6,7');
 ```
 
-**Why Both?**
-- **Firestore:** Child app can see settings, Firebase Function can check sleep time
-- **SharedPreferences:** Native Android services (AlarmUpdateReceiver, ScreenStateReceiver, ScreenMonitorService) can check sleep time without Firestore queries
+**Why Both?** (Updated 2025-10-31)
+- **Firestore:** Child app can see settings, **Firebase Function can check sleep time** (ONLY place that checks!)
+- **SharedPreferences:** ⚠️ Still saved for legacy reasons, but **NO LONGER USED** for sleep checks in data collection
+  - May be used for UI display or future features
+  - Keeping for backward compatibility
 
 **CRITICAL BUG FIXES:**
 
@@ -1349,39 +1396,198 @@ await prefs.setString('flutter.sleep_active_days', '1,2,3,4,5,6,7');
    val sleepStartHour = prefs.getLong("flutter.sleep_start_hour", 22).toInt()  // ✅ Works
    ```
 
-### Troubleshooting: "Sleep exclusion disabled" in logs but I enabled it
+5. **ARCHITECTURAL FIX - False Alarms After Sleep** (Fixed 2025-10-31 - **CRITICAL**)
+   - ❌ **Root cause:** Sleep time checks in data collection layer stopped updating `lastPhoneActivity` during sleep
+   - ❌ **Impact:** 8-hour sleep → `lastPhoneActivity` 8 hours old → False alarms after waking up
+   - ✅ **Fix:** Removed ALL sleep checks from data collection paths. Alert suppression now happens ONLY in Firebase Function.
 
-If you see this in logs:
+   **Files changed:**
+   - `AlarmUpdateReceiver.kt:510-516` - Removed sleep check, always updates survival signal
+   - `ScreenStateReceiver.kt:54-73` - Removed if/else, always updates survival signal
+   - `ScreenMonitorService.kt:454-476` - Removed if/else, always updates survival signal
+   - `firebase_service.dart:653-681` - Removed sleep check, always updates `lastPhoneActivity`
+   - `AlarmUpdateReceiver.kt` - Deleted unused `updateFirebaseWithBatteryOnly()` method
+
+   **Timeline of the bug (OLD):**
+   ```
+   22:00 → User sleeps, lastPhoneActivity = 22:00
+   22:00-06:00 → NO UPDATES (battery only) ❌
+   06:00 → User wakes, lastPhoneActivity = 22:00 (8 hours old!)
+   10:00 → Firebase Function: "12 hours inactive!" → FALSE ALARM! 🚨
+   ```
+
+   **Timeline after fix (NEW):**
+   ```
+   22:00 → User sleeps, lastPhoneActivity = 22:00
+   22:02 → Alarm: lastPhoneActivity = 22:02 ✅
+   22:04 → Alarm: lastPhoneActivity = 22:04 ✅
+   ... (every 2 minutes)
+   05:58 → Alarm: lastPhoneActivity = 05:58 ✅
+   06:00 → User wakes, lastPhoneActivity = 05:58 (2 min ago!)
+   10:00 → Firebase Function: 4 hours < 12 hours → No alert ✅
+   ```
+
+   **Why this is correct:**
+   - ✅ Data integrity first - `lastPhoneActivity` always fresh
+   - ✅ Alert logic second - Firebase Function suppresses alerts during sleep
+   - ✅ Separation of concerns - data layer doesn't make business decisions
+   - ✅ No false alarms - data is never stale
+
+### Troubleshooting - NEW BEHAVIOR (Fixed 2025-10-31)
+
+**⚠️ IMPORTANT:** As of 2025-10-31, you will NO LONGER see sleep-related messages in Android/Flutter logs because sleep checks have been removed from data collection paths.
+
+**Old logs you will NOT see anymore:**
 ```
-D/AlarmUpdateReceiver: 😴 Sleep exclusion disabled
-D/AlarmUpdateReceiver: ✅ Survival signal updated in Firebase
+❌ D/AlarmUpdateReceiver: 😴 Currently in sleep period - skipping survival signal
+❌ D/ScreenStateReceiver: 😴 Screen unlocked during sleep time - updating battery only
 ```
 
-But you enabled sleep exclusion in settings, check:
+**New behavior:**
+- Android/Flutter: ALWAYS updates `lastPhoneActivity` (no logs about sleep)
+- Firebase Function: Checks sleep time and skips alerts (logs only visible in Firebase Console)
 
-1. **Did settings save correctly?**
-   - Check SharedPreferences: `flutter.sleep_exclusion_enabled` should be `true`
-   - Check Firestore: `settings.sleepTimeSettings.enabled` should be `true`
-   - **Common cause:** User enabled sleep exclusion but Firestore still has `enabled: false` from previous disable (fixed in this update)
+**To verify sleep exclusion is working:**
+1. Check Firebase Function logs:
+   ```bash
+   firebase functions:log --only checkFamilySurvival
+   ```
 
-2. **Are you currently IN sleep time?**
-   - If current time is 10:00 and sleep is 22:00-06:00, you're NOT in sleep time
-   - The feature only activates DURING configured sleep hours
-   - Log "Sleep exclusion disabled" means the FEATURE is disabled, not that you're outside sleep hours
+2. During sleep hours, you should see:
+   ```
+   😴 ParentName is in sleep period - skipping alert
+   ```
 
-3. **Did you restart alarms after changing settings?**
-   - Settings changes are picked up immediately by native alarms
-   - No restart needed (alarms read SharedPreferences on every trigger)
+3. Check Firestore:
+   - `settings.sleepTimeSettings.enabled` should be `true`
+   - `lastPhoneActivity` should be updating EVERY 2 minutes (even during sleep!)
 
-### Log Message Meanings
+### Log Message Meanings - NEW (Fixed 2025-10-31)
 
-**"😴 Sleep exclusion disabled"**
-- Meaning: The sleep exclusion FEATURE is OFF
-- Behavior: Survival signals will update normally 24/7
+**Android/Flutter Logs:**
+- You will see normal survival signal updates at all times (no sleep-specific messages)
+- `✅ Survival signal + battery updated` - Appears during sleep AND awake hours
 
-**"😴 Currently in sleep period - skipping survival signal"**
-- Meaning: Sleep exclusion is ON and we're currently IN sleep hours
-- Behavior: Survival signal (lastPhoneActivity) is NOT updated, but battery/GPS continue
+**Firebase Function Logs (check Firebase Console):**
+
+**"😴 [Name] is in sleep period - skipping alert"**
+- Meaning: Sleep exclusion is enabled and we're currently IN sleep hours
+- Behavior: Alert suppressed, but `lastPhoneActivity` is fresh (updated by Android)
+
+**"📱 Family XXX ([Name]): 0.03 hours since last activity"**
+- Meaning: Normal check during sleep period
+- Behavior: Function sees fresh data (from continuous Android updates), decides not to alert based on sleep schedule
+
+---
+
+## Monitoring Settings for Child App (Added 2025-10-31)
+
+### Overview
+
+**Critical UX Issue:** Child app needs to know if parent has disabled monitoring features to avoid confusion.
+
+**Problem Scenario:**
+```
+Parent disables GPS tracking → lastLocation becomes 12 hours old
+Child app has no way to know GPS is disabled
+Child thinks: "부모님이 12시간 동안 움직이지 않았습니다" ❌ PANIC!
+Reality: Parent just disabled GPS tracking ✅
+```
+
+### Settings Stored in Firestore
+
+**Why store in Firestore?** So child app can display appropriate status and warnings.
+
+```javascript
+settings: {
+  survivalSignalEnabled: true/false,      // Parent monitoring status
+  locationTrackingEnabled: true/false,    // GPS tracking status
+  sleepTimeSettings: { ... }              // Sleep exclusion settings
+}
+```
+
+### Updated by Parent App
+
+**Files that sync these settings:**
+1. **settings_screen.dart** (lines 347, 394)
+   - When user toggles survival signal or GPS
+   - Saves to both SharedPreferences AND Firestore
+
+2. **initial_setup_screen.dart** (line 78)
+   - During first-time setup
+
+3. **post_recovery_settings_screen.dart** (line 334)
+   - When user recovers account after reinstall
+
+### Child App Implementation (Recommended)
+
+**Display Strategy:**
+
+```dart
+// Child app should show status banners when monitoring is disabled
+Widget buildMonitoringStatus(Map<String, dynamic> settings) {
+  final survivalEnabled = settings['survivalSignalEnabled'] ?? true;
+  final gpsEnabled = settings['locationTrackingEnabled'] ?? true;
+
+  return Column(
+    children: [
+      if (!survivalEnabled)
+        WarningBanner(
+          icon: Icons.health_and_safety_outlined,
+          title: '안전 확인 알림이 비활성화됨',
+          subtitle: '부모님이 안전 확인 알림을 끄셨습니다',
+          color: Colors.orange,
+        ),
+
+      if (!gpsEnabled)
+        WarningBanner(
+          icon: Icons.location_off,
+          title: 'GPS 추적이 비활성화됨',
+          subtitle: '부모님이 위치 공유를 끄셨습니다',
+          color: Colors.blue,
+        ),
+    ],
+  );
+}
+```
+
+**UI Examples:**
+
+**When Survival Signal Disabled:**
+```
+⚠️ 안전 확인 알림이 비활성화됨
+   부모님이 안전 확인 알림을 끄셨습니다
+   [최근 활동: 2시간 전]
+```
+
+**When GPS Disabled:**
+```
+📍 GPS 추적이 비활성화됨
+   부모님이 위치 공유를 끄셨습니다
+   [마지막 위치: 오전 9시 서울시 강남구]
+```
+
+### Backward Compatibility
+
+**Handling existing users without these fields:**
+```dart
+// Default to enabled if field doesn't exist (old family documents)
+final survivalEnabled = settings['survivalSignalEnabled'] ?? true;
+final gpsEnabled = settings['locationTrackingEnabled'] ?? true;
+```
+
+### Real-time Updates
+
+Child app uses Firestore real-time listener:
+```dart
+// Automatically updates when parent toggles settings
+_firestore.collection('families').doc(familyId).snapshots().listen((snapshot) {
+  final settings = snapshot.data()?['settings'];
+  // Update UI with new monitoring status
+});
+```
+
+**Update Latency:** Typically < 2 seconds from parent toggle to child app display.
 
 ---
 
