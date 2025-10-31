@@ -30,9 +30,9 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
         // Actions for each service type
         private const val ACTION_GPS_UPDATE = "com.thousandemfla.thanks_everyday.GPS_UPDATE"
         private const val ACTION_SURVIVAL_UPDATE = "com.thousandemfla.thanks_everyday.SURVIVAL_UPDATE"
-        
-        // 15-minute interval for both services (matches Firebase Function schedule)
-        private const val INTERVAL_MILLIS = 15 * 60 * 1000L
+
+        // 2-minute interval for both services (TESTING - matches Firebase Function schedule)
+        private const val INTERVAL_MILLIS = 2 * 60 * 1000L
         
         /**
          * Enable GPS location tracking - ALWAYS updates regardless of screen
@@ -47,7 +47,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             // Start GPS alarms
             scheduleGpsAlarm(context)
             
-            Log.i(TAG, "✅ GPS location tracking enabled - will update every 15 minutes ALWAYS")
+            Log.i(TAG, "✅ GPS location tracking enabled - will update every 2 minutes ALWAYS (TESTING)")
         }
         
         /**
@@ -83,7 +83,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             // Start survival alarms
             scheduleSurvivalAlarm(context)
             
-            Log.i(TAG, "✅ Survival signal monitoring enabled with 15-minute intervals")
+            Log.i(TAG, "✅ Survival signal monitoring enabled with 2-minute intervals (TESTING)")
         }
         
         /**
@@ -118,7 +118,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 
                 scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent)
                 
-                Log.d(TAG, "✅ GPS alarm scheduled for 15 minutes")
+                Log.d(TAG, "✅ GPS alarm scheduled for 2 minutes (TESTING)")
                 
                 // Record scheduling time
                 recordAlarmScheduled(context, "gps")
@@ -145,7 +145,7 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
                 
                 scheduleAlarmWithBestMethod(alarmManager, triggerAtMillis, pendingIntent)
                 
-                Log.d(TAG, "✅ Survival alarm scheduled for 15 minutes")
+                Log.d(TAG, "✅ Survival alarm scheduled for 2 minutes (TESTING)")
                 
                 // Record scheduling time
                 recordAlarmScheduled(context, "survival")
@@ -496,35 +496,37 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
      */
     private fun handleSurvivalUpdate(context: Context) {
         Log.d(TAG, "💓 Survival alarm triggered")
-        
+
         try {
             // Check if survival signal is still enabled
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val survivalEnabled = prefs.getBoolean("flutter.survival_signal_enabled", false)
-            
+
             if (!survivalEnabled) {
                 Log.d(TAG, "⚠️ Survival signal disabled - stopping alarms")
                 return
             }
-            
-            // Check if it's currently sleep time
-            if (isCurrentlySleepTime(context)) {
-                Log.d(TAG, "😴 Currently in sleep period - skipping survival signal check")
-                // Still record execution and schedule next alarm, but don't update Firebase
+
+            // Check if it's currently sleep time (use centralized helper)
+            if (SleepTimeHelper.isCurrentlySleepTime(context)) {
+                Log.d(TAG, "😴 Currently in sleep period - skipping survival signal, but updating battery")
+                // During sleep: Update battery ONLY, skip survival signal
+                updateFirebaseWithBatteryOnly(context)
+                // Still record execution and schedule next alarm
                 recordAlarmExecution(context, "survival")
                 scheduleSurvivalAlarm(context)
                 return
             }
-            
-            // Check screen state and update Firebase
+
+            // Check screen state and update Firebase (survival signal + battery)
             checkScreenStateAndUpdateFirebase(context)
-            
+
             // Record execution and schedule next alarm
             recordAlarmExecution(context, "survival")
             scheduleSurvivalAlarm(context)
-            
+
             Log.d(TAG, "✅ Survival signal updated, next alarm scheduled")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in survival update: ${e.message}")
             // Try to reschedule even if update failed
@@ -675,67 +677,50 @@ class AlarmUpdateReceiver : BroadcastReceiver() {
             Log.e(TAG, "❌ Error updating survival signal: ${e.message}")
         }
     }
-    
+
     /**
-     * Check if current time falls within sleep period
+     * Update Firebase with battery info ONLY (during sleep time)
+     * Does NOT update lastPhoneActivity to prevent false survival signals
      */
-    private fun isCurrentlySleepTime(context: Context): Boolean {
+    private fun updateFirebaseWithBatteryOnly(context: Context) {
+        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val familyId = prefs.getString("flutter.family_id", null)
+            ?: prefs.getString("family_id", null)
+
+        if (familyId.isNullOrEmpty()) {
+            Log.e(TAG, "❌ No family ID found for battery update")
+            return
+        }
+
         try {
-            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            
-            // Check if sleep exclusion is enabled
-            val sleepEnabled = prefs.getBoolean("flutter.sleep_exclusion_enabled", false)
-            if (!sleepEnabled) {
-                Log.d(TAG, "😴 Sleep exclusion disabled")
-                return false
-            }
-            
-            // Get sleep settings
-            val sleepStartHour = prefs.getInt("flutter.sleep_start_hour", 22)
-            val sleepStartMinute = prefs.getInt("flutter.sleep_start_minute", 0)
-            val sleepEndHour = prefs.getInt("flutter.sleep_end_hour", 6)
-            val sleepEndMinute = prefs.getInt("flutter.sleep_end_minute", 0)
-            
-            // Get active days (default to all days if not set)
-            val activeDaysString = prefs.getString("flutter.sleep_active_days", "1,2,3,4,5,6,7")
-            val activeDays = activeDaysString?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: listOf(1,2,3,4,5,6,7)
-            
-            val now = java.util.Calendar.getInstance()
-            val currentHour = now.get(java.util.Calendar.HOUR_OF_DAY)
-            val currentMinute = now.get(java.util.Calendar.MINUTE)
-            val currentWeekday = now.get(java.util.Calendar.DAY_OF_WEEK)
-            
-            // Convert to Monday=1, Sunday=7 format (Calendar uses Sunday=1)
-            val mondayBasedWeekday = if (currentWeekday == java.util.Calendar.SUNDAY) 7 else currentWeekday - 1
-            
-            // Check if today is an active day
-            if (!activeDays.contains(mondayBasedWeekday)) {
-                Log.d(TAG, "😴 Today ($mondayBasedWeekday) is not an active sleep day")
-                return false
-            }
-            
-            val currentTimeMinutes = currentHour * 60 + currentMinute
-            val sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute
-            val sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute
-            
-            val isSleepTime = if (sleepStartMinutes > sleepEndMinutes) {
-                // Overnight period (e.g., 22:00 - 06:00)
-                currentTimeMinutes >= sleepStartMinutes || currentTimeMinutes <= sleepEndMinutes
-            } else {
-                // Same-day period (e.g., 14:00 - 16:00)
-                currentTimeMinutes >= sleepStartMinutes && currentTimeMinutes <= sleepEndMinutes
-            }
-            
-            Log.d(TAG, "😴 Sleep time check: ${String.format("%02d:%02d", currentHour, currentMinute)} is ${if (isSleepTime) "SLEEP" else "AWAKE"} " +
-                    "(${String.format("%02d:%02d", sleepStartHour, sleepStartMinute)}-${String.format("%02d:%02d", sleepEndHour, sleepEndMinute)})")
-            
-            return isSleepTime
-            
+            val db = FirebaseFirestore.getInstance()
+
+            // Get battery info
+            val batteryInfo = BatteryService.getBatteryInfo(context)
+
+            // Update ONLY battery info, NOT lastPhoneActivity
+            val updateData = mapOf(
+                "batteryLevel" to batteryInfo["batteryLevel"]!!,
+                "isCharging" to batteryInfo["isCharging"]!!,
+                "batteryHealth" to batteryInfo["batteryHealth"]!!,
+                "batteryTimestamp" to FieldValue.serverTimestamp()
+            )
+
+            db.collection("families").document(familyId)
+                .update(updateData)
+                .addOnSuccessListener {
+                    val batteryLevel = batteryInfo["batteryLevel"] as Int
+                    val isCharging = batteryInfo["isCharging"] as Boolean
+                    Log.d(TAG, "✅ Battery info updated during sleep time | Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "❌ Failed to update battery info: ${e.message}")
+                }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error checking sleep time: ${e.message}")
-            return false
+            Log.e(TAG, "❌ Error updating battery info: ${e.message}")
         }
     }
+    
 
     /**
      * Get current location from LocationManager with enhanced error handling and fresh location request

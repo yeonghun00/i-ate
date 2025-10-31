@@ -343,15 +343,15 @@ class _PostRecoverySettingsScreenState extends State<PostRecoverySettingsScreen>
       await prefs.setBool('flutter.survival_signal_enabled', _survivalSignalEnabled);
       await prefs.setBool('flutter.location_tracking_enabled', _locationTrackingEnabled);
 
-      // Save sleep time exclusion settings locally
-      await prefs.setBool('flutter.sleep_exclusion_enabled', _sleepTimeExclusionEnabled);
+      // Save sleep time exclusion settings locally (Flutter plugin adds 'flutter.' prefix automatically)
+      await prefs.setBool('sleep_exclusion_enabled', _sleepTimeExclusionEnabled);
       if (_sleepTimeExclusionEnabled) {
         final sleepSettingsMap = _sleepTimeSettings.toMap();
-        await prefs.setInt('flutter.sleep_start_hour', sleepSettingsMap['sleepStartHour']);
-        await prefs.setInt('flutter.sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
-        await prefs.setInt('flutter.sleep_end_hour', sleepSettingsMap['sleepEndHour']);
-        await prefs.setInt('flutter.sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
-        await prefs.setString('flutter.sleep_active_days', sleepSettingsMap['activeDays'].join(','));
+        await prefs.setInt('sleep_start_hour', sleepSettingsMap['sleepStartHour']);
+        await prefs.setInt('sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
+        await prefs.setInt('sleep_end_hour', sleepSettingsMap['sleepEndHour']);
+        await prefs.setInt('sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
+        await prefs.setString('sleep_active_days', sleepSettingsMap['activeDays'].join(','));
       }
 
       AppLogger.info(

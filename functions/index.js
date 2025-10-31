@@ -236,16 +236,19 @@ exports.sendNotification = functions.runWith({
 
 // Helper function to check if current time is within sleep period
 function isCurrentlySleepTime(settings) {
-  if (!settings || !settings.sleepExclusionEnabled) {
+  const sleepEnabled = settings?.sleepTimeSettings?.enabled;
+
+  if (!settings || !sleepEnabled) {
     return false;
   }
 
+  const sleepSettings = settings.sleepTimeSettings;
   const now = new Date();
-  const sleepStartHour = settings.sleepStartHour || 22;
-  const sleepStartMinute = settings.sleepStartMinute || 0;
-  const sleepEndHour = settings.sleepEndHour || 6;
-  const sleepEndMinute = settings.sleepEndMinute || 0;
-  const sleepActiveDays = settings.sleepActiveDays || [1, 2, 3, 4, 5, 6, 7];
+  const sleepStartHour = sleepSettings.sleepStartHour || 22;
+  const sleepStartMinute = sleepSettings.sleepStartMinute || 0;
+  const sleepEndHour = sleepSettings.sleepEndHour || 6;
+  const sleepEndMinute = sleepSettings.sleepEndMinute || 0;
+  const sleepActiveDays = sleepSettings.activeDays || [1, 2, 3, 4, 5, 6, 7];
 
   // Check if today is an active sleep day
   const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
@@ -263,19 +266,20 @@ function isCurrentlySleepTime(settings) {
   // Check if in sleep period
   if (sleepStartMinutes > sleepEndMinutes) {
     // Overnight period (e.g., 22:00 - 06:00)
-    return currentMinutes >= sleepStartMinutes || currentMinutes <= sleepEndMinutes;
+    // Use < for end time so 06:00 exactly is considered awake
+    return currentMinutes >= sleepStartMinutes || currentMinutes < sleepEndMinutes;
   } else {
     // Same-day period (e.g., 14:00 - 16:00)
-    return currentMinutes >= sleepStartMinutes && currentMinutes <= sleepEndMinutes;
+    return currentMinutes >= sleepStartMinutes && currentMinutes < sleepEndMinutes;
   }
 }
 
-// Monitor all families for survival alerts - RUNS EVERY 15 MINUTES ON GOOGLE'S SERVERS
+// Monitor all families for survival alerts - RUNS EVERY 2 MINUTES ON GOOGLE'S SERVERS (TESTING)
 exports.checkFamilySurvival = functions.pubsub
-  .schedule('every 15 minutes')
+  .schedule('every 2 minutes')
   .timeZone('Asia/Seoul')
   .onRun(async (context) => {
-    console.log('🔍 Checking family survival status every 15 minutes...');
+    console.log('🔍 Checking family survival status every 2 minutes (TESTING)...');
     
     try {
       const familiesSnapshot = await admin.firestore()
@@ -327,8 +331,8 @@ exports.checkFamilySurvival = functions.pubsub
 
           // Check if currently in sleep time
           if (isCurrentlySleepTime(familyData.settings)) {
-            const sleepStart = familyData.settings?.sleepStartHour || 22;
-            const sleepEnd = familyData.settings?.sleepEndHour || 6;
+            const sleepStart = familyData.settings?.sleepTimeSettings?.sleepStartHour || 22;
+            const sleepEnd = familyData.settings?.sleepTimeSettings?.sleepEndHour || 6;
             console.log(`😴 ${elderlyName} is in sleep period (${sleepStart}:00-${sleepEnd}:00) - skipping alert`);
             return;
           }

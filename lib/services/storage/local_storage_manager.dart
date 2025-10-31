@@ -26,10 +26,20 @@ class LocalStorageManager {
     return prefs?.getString(key);
   }
 
+  Future<bool?> getBool(String key) async {
+    final prefs = await _getInstance();
+    return prefs?.getBool(key);
+  }
+
+  Future<int?> getInt(String key) async {
+    final prefs = await _getInstance();
+    return prefs?.getInt(key);
+  }
+
   Future<bool> setString(String key, String value) async {
     final prefs = await _getInstance();
     if (prefs == null) return false;
-    
+
     try {
       await prefs.setString(key, value);
       return true;
@@ -42,12 +52,25 @@ class LocalStorageManager {
   Future<bool> setBool(String key, bool value) async {
     final prefs = await _getInstance();
     if (prefs == null) return false;
-    
+
     try {
       await prefs.setBool(key, value);
       return true;
     } catch (e) {
       AppLogger.error('Failed to set bool $key: $e', tag: 'LocalStorageManager');
+      return false;
+    }
+  }
+
+  Future<bool> setInt(String key, int value) async {
+    final prefs = await _getInstance();
+    if (prefs == null) return false;
+
+    try {
+      await prefs.setInt(key, value);
+      return true;
+    } catch (e) {
+      AppLogger.error('Failed to set int $key: $e', tag: 'LocalStorageManager');
       return false;
     }
   }

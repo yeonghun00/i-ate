@@ -257,7 +257,7 @@ class ScreenMonitorService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("가족과 함께하는 안전한 일상")
                 .setContentText("안전 확인 서비스가 활성화되어 있습니다")
-                .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
+                .setSmallIcon(R.drawable.notification_icon) // Use custom logo with transparent background
                 .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for MIUI
                 .setOngoing(true)
                 .setShowWhen(false)
@@ -365,7 +365,7 @@ class ScreenMonitorService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
+            .setSmallIcon(R.drawable.notification_icon) // Use custom logo with transparent background
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setShowWhen(false)
@@ -451,29 +451,54 @@ class ScreenMonitorService : Service() {
             val isCharging = batteryInfo["isCharging"] as Boolean
             val batteryHealth = batteryInfo["batteryHealth"] as String
 
-            // Update Firebase with phone activity AND battery info
-            val updateData = mutableMapOf<String, Any>(
-                "lastPhoneActivity" to FieldValue.serverTimestamp(),
-                "batteryLevel" to batteryLevel,
-                "isCharging" to isCharging,
-                "batteryTimestamp" to FieldValue.serverTimestamp()
-            )
-
-            // Optional: Add battery health if not unknown
-            if (batteryHealth != "UNKNOWN") {
-                updateData["batteryHealth"] = batteryHealth
-            }
-
+            // Check if currently in sleep time
             val firestore = FirebaseFirestore.getInstance()
-            firestore.collection("families")
-                .document(familyId)
-                .update(updateData)
-                .addOnSuccessListener {
-                    Log.d(TAG, "✅ lastPhoneActivity + battery updated from screen unlock! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+            if (SleepTimeHelper.isCurrentlySleepTime(this)) {
+                Log.d(TAG, "😴 Screen event during sleep time - updating battery only, skipping survival signal")
+                // Update only battery during sleep time
+                val batteryOnlyUpdate = mutableMapOf<String, Any>(
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
+                if (batteryHealth != "UNKNOWN") {
+                    batteryOnlyUpdate["batteryHealth"] = batteryHealth
                 }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "❌ Failed to update lastPhoneActivity from service: ${e.message}")
+
+                firestore.collection("families")
+                    .document(familyId)
+                    .update(batteryOnlyUpdate)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ Battery updated (sleep time) from screen event! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "❌ Failed to update battery from service: ${e.message}")
+                    }
+            } else {
+                // Normal operation: Update survival signal + battery
+                val updateData = mutableMapOf<String, Any>(
+                    "lastPhoneActivity" to FieldValue.serverTimestamp(),
+                    "batteryLevel" to batteryLevel,
+                    "isCharging" to isCharging,
+                    "batteryTimestamp" to FieldValue.serverTimestamp()
+                )
+
+                // Optional: Add battery health if not unknown
+                if (batteryHealth != "UNKNOWN") {
+                    updateData["batteryHealth"] = batteryHealth
                 }
+
+                firestore.collection("families")
+                    .document(familyId)
+                    .update(updateData)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "✅ lastPhoneActivity + battery updated from screen event! Battery: $batteryLevel% ${if (isCharging) "⚡" else ""}")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "❌ Failed to update lastPhoneActivity from service: ${e.message}")
+                    }
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error updating phone activity from service: ${e.message}")

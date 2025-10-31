@@ -151,13 +151,13 @@ class _SettingsScreenState extends State<SettingsScreen>
         _foodAlertHours = prefs.getInt('food_alert_threshold') ?? 8;
         _permissionStatus = permissionStatus;
         
-        // Load sleep time settings
-        _sleepTimeExclusionEnabled = prefs.getBool('flutter.sleep_exclusion_enabled') ?? false;
-        final sleepStartHour = prefs.getInt('flutter.sleep_start_hour') ?? 22;
-        final sleepStartMinute = prefs.getInt('flutter.sleep_start_minute') ?? 0;
-        final sleepEndHour = prefs.getInt('flutter.sleep_end_hour') ?? 6;
-        final sleepEndMinute = prefs.getInt('flutter.sleep_end_minute') ?? 0;
-        final activeDaysString = prefs.getString('flutter.sleep_active_days') ?? '1,2,3,4,5,6,7';
+        // Load sleep time settings (Flutter plugin adds 'flutter.' prefix automatically)
+        _sleepTimeExclusionEnabled = prefs.getBool('sleep_exclusion_enabled') ?? false;
+        final sleepStartHour = prefs.getInt('sleep_start_hour') ?? 22;
+        final sleepStartMinute = prefs.getInt('sleep_start_minute') ?? 0;
+        final sleepEndHour = prefs.getInt('sleep_end_hour') ?? 6;
+        final sleepEndMinute = prefs.getInt('sleep_end_minute') ?? 0;
+        final activeDaysString = prefs.getString('sleep_active_days') ?? '1,2,3,4,5,6,7';
         final activeDays = activeDaysString.split(',').map((e) => int.parse(e.trim())).toList();
         
         _sleepTimeSettings = SleepTimeSettings(
@@ -292,12 +292,23 @@ class _SettingsScreenState extends State<SettingsScreen>
       );
       
       // Save sleep time settings locally
-      await prefs.setBool('flutter.sleep_exclusion_enabled', _sleepTimeExclusionEnabled);
-      await prefs.setInt('flutter.sleep_start_hour', _sleepTimeSettings.sleepStart.hour);
-      await prefs.setInt('flutter.sleep_start_minute', _sleepTimeSettings.sleepStart.minute);
-      await prefs.setInt('flutter.sleep_end_hour', _sleepTimeSettings.sleepEnd.hour);
-      await prefs.setInt('flutter.sleep_end_minute', _sleepTimeSettings.sleepEnd.minute);
-      await prefs.setString('flutter.sleep_active_days', _sleepTimeSettings.activeDays.join(','));
+      AppLogger.info('💾 Saving sleep settings to SharedPreferences:', tag: 'SettingsScreen');
+      AppLogger.info('  - sleep_exclusion_enabled: $_sleepTimeExclusionEnabled', tag: 'SettingsScreen');
+      AppLogger.info('  - sleep_start: ${_sleepTimeSettings.sleepStart.hour}:${_sleepTimeSettings.sleepStart.minute}', tag: 'SettingsScreen');
+      AppLogger.info('  - sleep_end: ${_sleepTimeSettings.sleepEnd.hour}:${_sleepTimeSettings.sleepEnd.minute}', tag: 'SettingsScreen');
+      AppLogger.info('  - active_days: ${_sleepTimeSettings.activeDays}', tag: 'SettingsScreen');
+      AppLogger.info('  - _sleepTimeSettings.enabled: ${_sleepTimeSettings.enabled}', tag: 'SettingsScreen');
+
+      await prefs.setBool('sleep_exclusion_enabled', _sleepTimeExclusionEnabled);
+      await prefs.setInt('sleep_start_hour', _sleepTimeSettings.sleepStart.hour);
+      await prefs.setInt('sleep_start_minute', _sleepTimeSettings.sleepStart.minute);
+      await prefs.setInt('sleep_end_hour', _sleepTimeSettings.sleepEnd.hour);
+      await prefs.setInt('sleep_end_minute', _sleepTimeSettings.sleepEnd.minute);
+      await prefs.setString('sleep_active_days', _sleepTimeSettings.activeDays.join(','));
+
+      // Verify what was actually saved (Flutter plugin adds 'flutter.' prefix automatically)
+      final savedEnabled = prefs.getBool('sleep_exclusion_enabled');
+      AppLogger.info('✅ Verified saved value: sleep_exclusion_enabled = $savedEnabled (stored as flutter.sleep_exclusion_enabled)', tag: 'SettingsScreen');
       
       AppLogger.info('Local settings updated successfully (alert hours stored in Firebase only)', tag: 'SettingsScreen');
 
@@ -319,6 +330,15 @@ class _SettingsScreenState extends State<SettingsScreen>
       if (_familyCode != null) {
         try {
           AppLogger.info('Updating Firebase settings for family code: $_familyCode', tag: 'SettingsScreen');
+
+          // Log what we're sending to Firebase
+          if (_sleepTimeExclusionEnabled) {
+            final sleepMap = _sleepTimeSettings.toMap();
+            AppLogger.info('☁️ Sending sleep settings to Firebase: $sleepMap', tag: 'SettingsScreen');
+          } else {
+            AppLogger.info('☁️ Sending null sleep settings to Firebase (disabling)', tag: 'SettingsScreen');
+          }
+
           final success = await _firebaseService.updateFamilySettings(
             survivalSignalEnabled: _survivalSignalEnabled,
             familyContact: _familyContact ?? '',

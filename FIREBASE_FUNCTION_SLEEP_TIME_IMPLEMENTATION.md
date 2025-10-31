@@ -172,9 +172,21 @@ families/{familyId}/
 
 ### Purpose
 
-**Problem:** If elderly person sleeps from 22:00 to 06:00, the parent app doesn't send survival signals during sleep. This is normal behavior, but we don't want to send false alerts during sleep time.
+**Problem:** When user sets survival alert threshold to a short time (e.g., 2 hours), they may receive false alerts during normal sleep hours (e.g., 22:00 - 06:00). The elderly person is sleeping, not inactive or in danger, but the lack of phone activity triggers an alert.
 
-**Solution:** Firebase Function checks if current time is within configured sleep period before sending alert.
+**Solution:**
+1. **Parent App:** During sleep time, skip updating `lastPhoneActivity` (survival signal) but CONTINUE updating GPS location and battery status
+2. **Firebase Function:** Check if current time is within configured sleep period before sending alert
+
+**What Still Works During Sleep Time:**
+- ✅ GPS location updates (every 15 minutes)
+- ✅ Battery status updates (every 15 minutes)
+- ❌ Survival signal (`lastPhoneActivity`) - SKIPPED during sleep
+
+**Why This Matters:**
+- Family can still track location and battery even during sleep
+- Survival alerts are suppressed during configured sleep hours to prevent false alarms
+- Example: If alert threshold is 2 hours and elderly person sleeps from 22:00 to 06:00, no alert is sent during this period
 
 ### How It Works
 

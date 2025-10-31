@@ -141,7 +141,7 @@ class GpsTrackingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
+            .setSmallIcon(R.drawable.notification_icon) // Use custom logo with transparent background
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -328,7 +328,7 @@ class GpsTrackingService : Service() {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(mainText)
-                .setSmallIcon(R.mipmap.ic_launcher) // Use app logo
+                .setSmallIcon(R.drawable.notification_icon) // Use custom logo with transparent background
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setAutoCancel(false)

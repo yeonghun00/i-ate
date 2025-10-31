@@ -95,6 +95,14 @@ await _firestore.collection('families').doc(familyId).set({
     'survivalSignalEnabled': false,
     'familyContact': '',
     'alertHours': 12,
+    'sleepTimeSettings': {
+      'enabled': false,
+      'sleepStartHour': 22,
+      'sleepStartMinute': 0,
+      'sleepEndHour': 6,
+      'sleepEndMinute': 0,
+      'activeDays': [1,2,3,4,5,6,7]
+    }
   },
   'alerts': {
     'survival': null,
@@ -1054,6 +1062,326 @@ await for (final snapshot in _firestore.collection('families').doc(familyId).sna
    ├── Update families/{id}.approved
    └── Parent app detects approval via stream
 ```
+
+---
+
+## Sleep Time Exclusion Feature
+
+### Overview
+Sleep time exclusion prevents false survival alerts during configured sleep hours. When enabled, the system:
+- ✅ **CONTINUES** updating GPS location and battery status
+- ❌ **SKIPS** updating survival signal (`lastPhoneActivity`)
+
+This allows users with short alert thresholds (e.g., 2-3 hours) to avoid false alarms during normal sleep.
+
+### Data Structure
+
+Sleep settings are stored in Firestore under `settings.sleepTimeSettings` (nested object):
+
+```javascript
+settings: {
+  sleepTimeSettings: {
+    enabled: true,              // Toggle sleep exclusion on/off
+    sleepStartHour: 22,         // Sleep start time: hour (0-23)
+    sleepStartMinute: 0,        // Sleep start time: minute (0-59)
+    sleepEndHour: 6,            // Sleep end time: hour (0-23)
+    sleepEndMinute: 0,          // Sleep end time: minute (0-59)
+    activeDays: [1,2,3,4,5,6,7] // Active days (1=Monday, 7=Sunday)
+  }
+}
+```
+
+**Important:** Sleep settings are stored as a **nested object** under `sleepTimeSettings`, NOT as flat fields. Always access as `settings.sleepTimeSettings.enabled`, never `settings.sleepExclusionEnabled`.
+
+### Implementation Across All Update Paths
+
+Sleep time is checked in **5 different update paths**, all using centralized logic:
+
+#### 1. Android Native Alarms (Every 2 minutes - TESTING)
+**File:** `android/.../AlarmUpdateReceiver.kt:510-519`
+**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+```kotlin
+if (SleepTimeHelper.isCurrentlySleepTime(context)) {
+    Log.d(TAG, "😴 Currently in sleep period - skipping survival signal, but updating battery")
+    updateFirebaseWithBatteryOnly(context) // Battery only
+    recordAlarmExecution(context, "survival")
+    scheduleSurvivalAlarm(context)
+    return
+}
+// Normal: Update survival signal + battery
+checkScreenStateAndUpdateFirebase(context)
+```
+
+#### 2. Screen Unlock Events (Immediate)
+**File:** `android/.../ScreenStateReceiver.kt:54-94`
+**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+```kotlin
+if (SleepTimeHelper.isCurrentlySleepTime(context)) {
+    Log.d(TAG, "😴 Screen unlocked during sleep time - updating battery only")
+    val batteryOnlyUpdate = mutableMapOf<String, Any>(
+        "batteryLevel" to batteryLevel,
+        "isCharging" to isCharging,
+        "batteryTimestamp" to FieldValue.serverTimestamp()
+    )
+    firestore.collection("families").document(familyId).update(batteryOnlyUpdate)
+} else {
+    // Normal: Update survival signal + battery
+    val survivalUpdate = mutableMapOf<String, Any>(
+        "lastPhoneActivity" to FieldValue.serverTimestamp(),
+        "batteryLevel" to batteryLevel,
+        "isCharging" to isCharging
+    )
+    firestore.collection("families").document(familyId).update(survivalUpdate)
+}
+```
+
+#### 3. Screen Events (From Service)
+**File:** `android/.../ScreenMonitorService.kt:456-501`
+**Uses:** `SleepTimeHelper.isCurrentlySleepTime(context)` ✅
+```kotlin
+if (SleepTimeHelper.isCurrentlySleepTime(this)) {
+    Log.d(TAG, "😴 Screen event during sleep time - updating battery only")
+    // Battery only update (same as ScreenStateReceiver)
+} else {
+    // Normal: Update survival signal + battery
+}
+```
+
+#### 4. Flutter Activity Updates
+**File:** `lib/services/firebase_service.dart:654-681`
+**Uses:** `_isCurrentlySleepTime()` (internal method) ✅
+```dart
+final isInSleepTime = await _isCurrentlySleepTime();
+
+if (isInSleepTime) {
+  AppLogger.info('😴 Currently in sleep period - skipping survival signal');
+} else {
+  updateData['lastPhoneActivity'] = FieldValue.serverTimestamp();
+  updateData['lastActivityType'] = _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity';
+}
+
+// Always add battery info (regardless of sleep time)
+if (batteryInfo != null) {
+  updateData['batteryLevel'] = batteryInfo['batteryLevel'];
+  updateData['isCharging'] = batteryInfo['isCharging'];
+  updateData['batteryTimestamp'] = FieldValue.serverTimestamp();
+}
+```
+
+#### 5. Firebase Cloud Function (Server-side)
+**File:** `functions/index.js:237-275`
+**Uses:** `isCurrentlySleepTime(settings)` (server-side function) ✅
+```javascript
+function isCurrentlySleepTime(settings) {
+  const sleepEnabled = settings?.sleepTimeSettings?.enabled;
+  if (!settings || !sleepEnabled) return false;
+
+  const sleepSettings = settings.sleepTimeSettings;
+  const sleepStartHour = sleepSettings.sleepStartHour || 22;
+  const sleepStartMinute = sleepSettings.sleepStartMinute || 0;
+  // ... check current time against sleep period
+
+  // Use < for end time so 06:00 exactly is considered awake
+  return currentMinutes >= sleepStartMinutes || currentMinutes < sleepEndMinutes;
+}
+
+// Called when checking if alert should be sent
+if (isCurrentlySleepTime(familyData.settings)) {
+  console.log(`😴 ${elderlyName} is in sleep period - skipping alert`);
+  return;
+}
+```
+
+### Sleep Time Helper (Centralized)
+**File:** `android/.../SleepTimeHelper.kt`
+
+A centralized Kotlin helper for checking sleep time across all Android components:
+
+```kotlin
+object SleepTimeHelper {
+    fun isCurrentlySleepTime(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val sleepEnabled = prefs.getBoolean("flutter.sleep_exclusion_enabled", false)
+        if (!sleepEnabled) return false
+
+        // Read sleep settings from SharedPreferences
+        val sleepStartHour = prefs.getInt("flutter.sleep_start_hour", 22)
+        val sleepStartMinute = prefs.getInt("flutter.sleep_start_minute", 0)
+        val sleepEndHour = prefs.getInt("flutter.sleep_end_hour", 6)
+        val sleepEndMinute = prefs.getInt("flutter.sleep_end_minute", 0)
+
+        // Check active days (Monday=1, Sunday=7)
+        val activeDaysString = prefs.getString("flutter.sleep_active_days", "1,2,3,4,5,6,7")
+        val activeDays = activeDaysString?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: listOf(1,2,3,4,5,6,7)
+
+        // Check if today is an active sleep day
+        val now = Calendar.getInstance()
+        val currentWeekday = if (now.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY) 7 else now.get(Calendar.DAY_OF_WEEK) - 1
+        if (!activeDays.contains(currentWeekday)) return false
+
+        // Calculate time ranges
+        val currentMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        val sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute
+        val sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute
+
+        // Check if in sleep period (use < for instant morning resumption)
+        return if (sleepStartMinutes > sleepEndMinutes) {
+            currentMinutes >= sleepStartMinutes || currentMinutes < sleepEndMinutes
+        } else {
+            currentMinutes >= sleepStartMinutes && currentMinutes < sleepEndMinutes
+        }
+    }
+}
+```
+
+### Automatic Morning Resumption
+
+Sleep time checking is **stateless** - calculated fresh on every update. This ensures automatic resumption when sleep period ends:
+
+**Timeline Example (Sleep: 22:00-06:00):**
+```
+05:58 → isCurrentlySleepTime() = true → Update battery only
+06:00 → isCurrentlySleepTime() = false → Resume survival signal (< operator ensures instant resumption)
+06:02 → Next alarm/event → Full survival signal update resumes
+```
+
+**Critical Implementation Detail:** All sleep time checks use `<` (not `<=`) for the end time comparison:
+```kotlin
+currentMinutes < sleepEndMinutes  // 06:00 exactly is considered awake
+```
+
+This ensures survival signal updates resume **immediately** at 06:00, not at 06:01.
+
+### What Continues During Sleep Time
+
+Even when sleep exclusion is active:
+- ✅ **GPS location updates** - Always update (for safety)
+- ✅ **Battery status updates** - Always update (for monitoring)
+- ✅ **Timestamp tracking** - `batteryTimestamp` is updated
+- ❌ **Survival signal** - `lastPhoneActivity` is NOT updated
+
+### Settings Persistence
+
+Sleep settings are saved to **both** Firestore and SharedPreferences:
+
+**Firestore (Cloud):**
+```dart
+await _firestore.collection('families').doc(familyId).update({
+  'settings.sleepTimeSettings': {
+    'enabled': true,
+    'sleepStartHour': 22,
+    'sleepStartMinute': 0,
+    'sleepEndHour': 6,
+    'sleepEndMinute': 0,
+    'activeDays': [1,2,3,4,5,6,7]
+  }
+});
+```
+
+**SharedPreferences (Local - for native Android services):**
+```dart
+await prefs.setBool('flutter.sleep_exclusion_enabled', true);
+await prefs.setInt('flutter.sleep_start_hour', 22);
+await prefs.setInt('flutter.sleep_start_minute', 0);
+await prefs.setInt('flutter.sleep_end_hour', 6);
+await prefs.setInt('flutter.sleep_end_minute', 0);
+await prefs.setString('flutter.sleep_active_days', '1,2,3,4,5,6,7');
+```
+
+**Why Both?**
+- **Firestore:** Child app can see settings, Firebase Function can check sleep time
+- **SharedPreferences:** Native Android services (AlarmUpdateReceiver, ScreenStateReceiver, ScreenMonitorService) can check sleep time without Firestore queries
+
+**CRITICAL BUG FIXES:**
+
+1. **Firestore Update When Disabling** (Fixed in `family_data_manager.dart:96-104`)
+   - ❌ Old behavior: User enables → Firestore gets `enabled: true`. User disables → Firestore not updated → Still has `enabled: true`
+   - ✅ New behavior: User disables → Firestore gets `settings.sleepTimeSettings.enabled = false` → Consistent state
+   - This ensures the Firebase Function and child app see the correct state.
+
+2. **Duplicate Sleep Time Check in AlarmUpdateReceiver** (Fixed in `AlarmUpdateReceiver.kt:511`)
+   - ❌ Old behavior: `AlarmUpdateReceiver` had its own duplicate `isCurrentlySleepTime()` method (50+ lines)
+   - ✅ New behavior: Uses centralized `SleepTimeHelper.isCurrentlySleepTime(context)`
+   - **Why this matters:** The duplicate method had subtle differences (used `<=` instead of `<` for boundary) and required changes in two places
+   - **Impact:** Secondary bug - code duplication made it harder to maintain
+   - All components now use the same canonical implementation for consistent behavior
+
+3. **SharedPreferences Key Prefix Mismatch** (Fixed in all screens - **THIS WAS THE PRIMARY BUG**)
+   - ❌ **Root cause:** Flutter's `shared_preferences` plugin **automatically adds** `flutter.` prefix when writing
+   - ❌ Old code: Manually added prefix in Dart: `prefs.setBool('flutter.sleep_exclusion_enabled', true)`
+   - ❌ Actual key stored: `flutter.flutter.sleep_exclusion_enabled` (DOUBLE prefix!)
+   - ❌ Native reads: `prefs.getBoolean("flutter.sleep_exclusion_enabled", false)` → Returns `false` (key not found!)
+   - ✅ **Fix:** Remove manual prefix in Dart code: `prefs.setBool('sleep_exclusion_enabled', true)`
+   - ✅ Now stored as: `flutter.sleep_exclusion_enabled` (correct!)
+   - ✅ Native reads: `prefs.getBoolean("flutter.sleep_exclusion_enabled", false)` → Returns correct value!
+
+   **Files fixed:**
+   - `lib/screens/settings_screen.dart` (lines 302-307, 155-160)
+   - `lib/screens/initial_setup_screen.dart` (lines 97, 102-106)
+   - `lib/screens/post_recovery_settings_screen.dart` (lines 347, 350-354)
+
+   **Evidence from logs:**
+   ```
+   Flutter saves: sleep_exclusion_enabled = true
+   Actual key stored: flutter.sleep_exclusion_enabled ✅
+   Native reads: flutter.sleep_exclusion_enabled = true ✅
+   ```
+
+   vs Old behavior:
+   ```
+   Flutter saves: flutter.sleep_exclusion_enabled = true
+   Actual key stored: flutter.flutter.sleep_exclusion_enabled ❌
+   Native reads: flutter.sleep_exclusion_enabled = false (not found!) ❌
+   ```
+
+4. **Integer Type Mismatch** (Fixed in `SleepTimeHelper.kt:33-36`)
+   - ❌ **Root cause:** Flutter's `shared_preferences` stores integers as **Long (64-bit)** in Android
+   - ❌ Old code: Native reads with `getInt()` → `java.lang.Long cannot be cast to java.lang.Integer` error
+   - ✅ **Fix:** Read with `getLong()` and convert to Int: `prefs.getLong("flutter.sleep_start_hour", 22).toInt()`
+
+   **Before:**
+   ```kotlin
+   val sleepStartHour = prefs.getInt("flutter.sleep_start_hour", 22)  // ❌ Crashes
+   ```
+
+   **After:**
+   ```kotlin
+   val sleepStartHour = prefs.getLong("flutter.sleep_start_hour", 22).toInt()  // ✅ Works
+   ```
+
+### Troubleshooting: "Sleep exclusion disabled" in logs but I enabled it
+
+If you see this in logs:
+```
+D/AlarmUpdateReceiver: 😴 Sleep exclusion disabled
+D/AlarmUpdateReceiver: ✅ Survival signal updated in Firebase
+```
+
+But you enabled sleep exclusion in settings, check:
+
+1. **Did settings save correctly?**
+   - Check SharedPreferences: `flutter.sleep_exclusion_enabled` should be `true`
+   - Check Firestore: `settings.sleepTimeSettings.enabled` should be `true`
+   - **Common cause:** User enabled sleep exclusion but Firestore still has `enabled: false` from previous disable (fixed in this update)
+
+2. **Are you currently IN sleep time?**
+   - If current time is 10:00 and sleep is 22:00-06:00, you're NOT in sleep time
+   - The feature only activates DURING configured sleep hours
+   - Log "Sleep exclusion disabled" means the FEATURE is disabled, not that you're outside sleep hours
+
+3. **Did you restart alarms after changing settings?**
+   - Settings changes are picked up immediately by native alarms
+   - No restart needed (alarms read SharedPreferences on every trigger)
+
+### Log Message Meanings
+
+**"😴 Sleep exclusion disabled"**
+- Meaning: The sleep exclusion FEATURE is OFF
+- Behavior: Survival signals will update normally 24/7
+
+**"😴 Currently in sleep period - skipping survival signal"**
+- Meaning: Sleep exclusion is ON and we're currently IN sleep hours
+- Behavior: Survival signal (lastPhoneActivity) is NOT updated, but battery/GPS continue
 
 ---
 

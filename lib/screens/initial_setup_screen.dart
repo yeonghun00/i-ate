@@ -92,18 +92,18 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           _locationTrackingEnabled,
         );
         
-        // Save sleep time exclusion settings
+        // Save sleep time exclusion settings (Flutter plugin adds 'flutter.' prefix automatically)
         await prefs.setBool(
-          'flutter.sleep_exclusion_enabled',
+          'sleep_exclusion_enabled',
           _sleepTimeExclusionEnabled,
         );
         if (_sleepTimeExclusionEnabled) {
           final sleepSettingsMap = _sleepTimeSettings.toMap();
-          await prefs.setInt('flutter.sleep_start_hour', sleepSettingsMap['sleepStartHour']);
-          await prefs.setInt('flutter.sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
-          await prefs.setInt('flutter.sleep_end_hour', sleepSettingsMap['sleepEndHour']);
-          await prefs.setInt('flutter.sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
-          await prefs.setString('flutter.sleep_active_days', sleepSettingsMap['activeDays'].join(','));
+          await prefs.setInt('sleep_start_hour', sleepSettingsMap['sleepStartHour']);
+          await prefs.setInt('sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
+          await prefs.setInt('sleep_end_hour', sleepSettingsMap['sleepEndHour']);
+          await prefs.setInt('sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
+          await prefs.setString('sleep_active_days', sleepSettingsMap['activeDays'].join(','));
         }
         // Note: alert_hours is now stored in Firebase only
 

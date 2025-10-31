@@ -92,11 +92,15 @@ class FamilyDataManager {
         'settings.familyContact': familyContact,
         'settings.alertHours': alertHours ?? 12,
       };
-      
-      // Add sleep settings if provided
+
+      // Add sleep settings if provided, or explicitly disable if null
       if (sleepTimeSettings != null) {
         updateData['settings.sleepTimeSettings'] = sleepTimeSettings;
         AppLogger.info('Including sleep time settings in update', tag: 'FamilyDataManager');
+      } else {
+        // Explicitly set enabled = false when sleep exclusion is disabled
+        updateData['settings.sleepTimeSettings.enabled'] = false;
+        AppLogger.info('Disabling sleep exclusion in Firestore', tag: 'FamilyDataManager');
       }
 
       await _firestore.collection('families').doc(familyId).update(updateData);

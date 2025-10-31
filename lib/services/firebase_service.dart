@@ -650,13 +650,22 @@ class FirebaseService {
       // Get battery info
       final batteryInfo = await BatteryService.getBatteryInfo();
 
-      final updateData = <String, dynamic>{
-        'lastPhoneActivity': FieldValue.serverTimestamp(),
-        'lastActivityType': _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity',
-        'updateTimestamp': FieldValue.serverTimestamp(),
-      };
+      // Check if currently in sleep time
+      final isInSleepTime = await _isCurrentlySleepTime();
 
-      // Add battery info if available
+      final updateData = <String, dynamic>{};
+
+      if (isInSleepTime) {
+        // During sleep time: Update ONLY battery, skip survival signal
+        AppLogger.info('😴 Currently in sleep period - skipping survival signal, updating battery only', tag: 'FirebaseService');
+      } else {
+        // Normal operation: Update survival signal
+        updateData['lastPhoneActivity'] = FieldValue.serverTimestamp();
+        updateData['lastActivityType'] = _activityBatcher.isFirstActivity ? 'first_activity' : 'batched_activity';
+        updateData['updateTimestamp'] = FieldValue.serverTimestamp();
+      }
+
+      // Always add battery info if available (regardless of sleep time)
       if (batteryInfo != null) {
         updateData['batteryLevel'] = batteryInfo['batteryLevel'];
         updateData['isCharging'] = batteryInfo['isCharging'];
@@ -667,20 +676,74 @@ class FirebaseService {
       // Send update to Firebase
       await _firestore.collection('families').doc(_familyId).update(updateData);
 
-      _activityBatcher.recordBatch();
+      if (!isInSleepTime) {
+        _activityBatcher.recordBatch();
+      }
 
       if (batteryInfo != null) {
         final batteryLevel = batteryInfo['batteryLevel'] as int;
         final isCharging = batteryInfo['isCharging'] as bool;
-        AppLogger.info('Activity update sent to Firebase | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}', tag: 'FirebaseService');
+        final statusMessage = isInSleepTime
+            ? 'Battery updated during sleep time | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}'
+            : 'Activity update sent to Firebase | Battery: $batteryLevel% ${isCharging ? "⚡" : ""}';
+        AppLogger.info(statusMessage, tag: 'FirebaseService');
       } else {
-        AppLogger.info('Activity update sent to Firebase', tag: 'FirebaseService');
+        AppLogger.info(isInSleepTime ? 'Battery update during sleep time' : 'Activity update sent to Firebase', tag: 'FirebaseService');
       }
 
       return true;
     } catch (e) {
       AppLogger.error('Failed to update phone activity: $e', tag: 'FirebaseService');
       return false;
+    }
+  }
+
+  /// Check if current time falls within sleep period
+  /// Returns false if sleep exclusion is disabled
+  Future<bool> _isCurrentlySleepTime() async {
+    try {
+      // Check if sleep exclusion is enabled
+      final sleepEnabled = await _storage.getBool('sleep_exclusion_enabled') ?? false;
+      if (!sleepEnabled) {
+        return false;
+      }
+
+      // Get sleep time settings from SharedPreferences
+      final sleepStartHour = await _storage.getInt('sleep_start_hour') ?? 22;
+      final sleepStartMinute = await _storage.getInt('sleep_start_minute') ?? 0;
+      final sleepEndHour = await _storage.getInt('sleep_end_hour') ?? 6;
+      final sleepEndMinute = await _storage.getInt('sleep_end_minute') ?? 0;
+
+      final sleepActiveDaysString = await _storage.getString('sleep_active_days') ?? '1,2,3,4,5,6,7';
+      final sleepActiveDays = sleepActiveDaysString.split(',').map((e) => int.tryParse(e.trim()) ?? 0).toList();
+
+      final now = DateTime.now();
+      final currentHour = now.hour;
+      final currentMinute = now.minute;
+      final currentWeekday = now.weekday; // 1=Monday, 7=Sunday
+
+      // Check if today is an active sleep day
+      if (!sleepActiveDays.contains(currentWeekday)) {
+        return false;
+      }
+
+      // Convert times to minutes since midnight
+      final currentMinutes = currentHour * 60 + currentMinute;
+      final sleepStartMinutes = sleepStartHour * 60 + sleepStartMinute;
+      final sleepEndMinutes = sleepEndHour * 60 + sleepEndMinute;
+
+      // Check if in sleep period
+      if (sleepStartMinutes > sleepEndMinutes) {
+        // Overnight period (e.g., 22:00 - 06:00)
+        // Use < for end time so 06:00 exactly is considered awake
+        return currentMinutes >= sleepStartMinutes || currentMinutes < sleepEndMinutes;
+      } else {
+        // Same-day period (e.g., 14:00 - 16:00)
+        return currentMinutes >= sleepStartMinutes && currentMinutes < sleepEndMinutes;
+      }
+    } catch (e) {
+      AppLogger.error('Error checking sleep time: $e', tag: 'FirebaseService');
+      return false; // Default to not in sleep time if error
     }
   }
 
