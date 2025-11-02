@@ -116,7 +116,7 @@ class AppInitializationService {
     try {
       // Check Firebase setup
       final isFirebaseSetup = await _firebaseService.initialize();
-      
+
       // Check SharedPreferences setup
       final prefs = await SharedPreferences.getInstance();
       final setupComplete = prefs.getBool(AppConstants.keySetupComplete) ?? false;
@@ -127,6 +127,49 @@ class AppInitializationService {
       logInfo('  - SharedPreferences setup: $setupComplete');
       logInfo('  - Has family code: $hasFamilyCode');
 
+      // SECURITY FIX: Check if Firebase family was actually approved by child app
+      if (isFirebaseSetup && hasFamilyCode) {
+        final familyCode = prefs.getString(AppConstants.keyFamilyCode);
+        if (familyCode != null) {
+          logInfo('Checking approval status for family code: $familyCode');
+          final familyInfo = await _firebaseService.getFamilyInfo(familyCode);
+
+          if (familyInfo != null) {
+            final approved = familyInfo['approved'] as bool?;
+            logInfo('  - Approval status: $approved');
+
+            // If not approved, consider setup incomplete
+            if (approved != true) {
+              logWarning('Family code exists but not approved by child app - returning to setup');
+
+              // Clear incomplete setup data
+              await prefs.remove(AppConstants.keySetupComplete);
+              await prefs.remove(AppConstants.keyFamilyCode);
+
+              // Delete the unapproved family code from Firebase
+              try {
+                await _firebaseService.deleteFamilyCode(familyCode);
+                logInfo('Deleted unapproved family code from Firebase');
+              } catch (e) {
+                logError('Failed to delete unapproved family code', error: e);
+              }
+
+              return false;
+            }
+
+            logInfo('Family code approved - setup is complete');
+          } else {
+            logWarning('Family info not found in Firebase - returning to setup');
+
+            // Clear invalid setup data
+            await prefs.remove(AppConstants.keySetupComplete);
+            await prefs.remove(AppConstants.keyFamilyCode);
+
+            return false;
+          }
+        }
+      }
+
       // Auto-detection logic for existing accounts
       if (!isFirebaseSetup && !setupComplete && !hasFamilyCode) {
         await _tryAutoDetection();
@@ -134,9 +177,9 @@ class AppInitializationService {
 
       final actuallySetup = isFirebaseSetup || setupComplete;
       logInfo('Final setup decision: $actuallySetup');
-      
+
       return actuallySetup;
-      
+
     } catch (e) {
       logError('Setup status check failed', error: e);
       return false;

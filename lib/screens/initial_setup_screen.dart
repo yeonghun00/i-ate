@@ -68,18 +68,27 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
 
       if (generatedCode != null) {
         // Update Firebase settings with correct alert hours and sleep settings
-        AppLogger.info('Saving alert hours to Firebase: $_alertHours', tag: 'InitialSetupScreen');
-        final sleepSettings = _sleepTimeExclusionEnabled ? _sleepTimeSettings.toMap() : null;
+        AppLogger.info(
+          'Saving alert hours to Firebase: $_alertHours',
+          tag: 'InitialSetupScreen',
+        );
+        final sleepSettings = _sleepTimeExclusionEnabled
+            ? _sleepTimeSettings.toMap()
+            : null;
         final settingsUpdated = await _firebaseService.updateFamilySettings(
           survivalSignalEnabled: _survivalSignalEnabled,
           familyContact: '',
           alertHours: _alertHours,
           sleepTimeSettings: sleepSettings,
-          locationTrackingEnabled: _locationTrackingEnabled,  // Child app can see GPS status
+          locationTrackingEnabled:
+              _locationTrackingEnabled, // Child app can see GPS status
         );
-        
+
         if (!settingsUpdated) {
-          AppLogger.error('Failed to save settings to Firebase', tag: 'InitialSetupScreen');
+          AppLogger.error(
+            'Failed to save settings to Firebase',
+            tag: 'InitialSetupScreen',
+          );
         }
 
         // Save only essential settings to SharedPreferences (Firebase is primary source for alert hours)
@@ -92,7 +101,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
           'flutter.location_tracking_enabled',
           _locationTrackingEnabled,
         );
-        
+
         // Save sleep time exclusion settings (Flutter plugin adds 'flutter.' prefix automatically)
         await prefs.setBool(
           'sleep_exclusion_enabled',
@@ -100,11 +109,26 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         );
         if (_sleepTimeExclusionEnabled) {
           final sleepSettingsMap = _sleepTimeSettings.toMap();
-          await prefs.setInt('sleep_start_hour', sleepSettingsMap['sleepStartHour']);
-          await prefs.setInt('sleep_start_minute', sleepSettingsMap['sleepStartMinute']);
-          await prefs.setInt('sleep_end_hour', sleepSettingsMap['sleepEndHour']);
-          await prefs.setInt('sleep_end_minute', sleepSettingsMap['sleepEndMinute']);
-          await prefs.setString('sleep_active_days', sleepSettingsMap['activeDays'].join(','));
+          await prefs.setInt(
+            'sleep_start_hour',
+            sleepSettingsMap['sleepStartHour'],
+          );
+          await prefs.setInt(
+            'sleep_start_minute',
+            sleepSettingsMap['sleepStartMinute'],
+          );
+          await prefs.setInt(
+            'sleep_end_hour',
+            sleepSettingsMap['sleepEndHour'],
+          );
+          await prefs.setInt(
+            'sleep_end_minute',
+            sleepSettingsMap['sleepEndMinute'],
+          );
+          await prefs.setString(
+            'sleep_active_days',
+            sleepSettingsMap['activeDays'].join(','),
+          );
         }
         // Note: alert_hours is now stored in Firebase only
 
@@ -139,19 +163,28 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   void _startListeningForApproval() {
     if (_generatedCode == null) return;
 
-    AppLogger.info('Starting to listen for approval for code: $_generatedCode', tag: 'InitialSetupScreen');
+    AppLogger.info(
+      'Starting to listen for approval for code: $_generatedCode',
+      tag: 'InitialSetupScreen',
+    );
 
     // Listen to Firebase for approval changes with error handling
     _approvalSubscription = _firebaseService
         .listenForApproval(_generatedCode!)
         .listen(
           (approved) {
-            AppLogger.info('Approval status changed: $approved', tag: 'InitialSetupScreen');
+            AppLogger.info(
+              'Approval status changed: $approved',
+              tag: 'InitialSetupScreen',
+            );
 
             if (mounted) {
               if (approved == true) {
                 // Approved by child app - proceed immediately
-                AppLogger.info('Approved! Proceeding to guide...', tag: 'InitialSetupScreen');
+                AppLogger.info(
+                  'Approved! Proceeding to guide...',
+                  tag: 'InitialSetupScreen',
+                );
 
                 // Cancel all timers immediately
                 _approvalSubscription?.cancel();
@@ -177,7 +210,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                 }
               } else if (approved == false) {
                 // Rejected by child app - reset
-                AppLogger.info('Rejected! Resetting setup...', tag: 'InitialSetupScreen');
+                AppLogger.info(
+                  'Rejected! Resetting setup...',
+                  tag: 'InitialSetupScreen',
+                );
 
                 setState(() {
                   _isWaitingForApproval = false;
@@ -189,7 +225,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
             }
           },
           onError: (error) {
-            AppLogger.error('Error listening for approval: $error', tag: 'InitialSetupScreen');
+            AppLogger.error(
+              'Error listening for approval: $error',
+              tag: 'InitialSetupScreen',
+            );
             if (mounted) {
               _showMessage('연결 오류가 발생했습니다. 다시 시도해주세요.');
             }
@@ -205,7 +244,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
       final familyInfo = await _firebaseService.getFamilyInfo(_generatedCode!);
       if (familyInfo != null) {
         final approved = familyInfo['approved'] as bool?;
-        AppLogger.debug('Manual refresh - approved: $approved', tag: 'InitialSetupScreen');
+        AppLogger.debug(
+          'Manual refresh - approved: $approved',
+          tag: 'InitialSetupScreen',
+        );
 
         if (mounted) {
           if (approved == true) {
@@ -260,7 +302,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         );
         if (familyInfo != null) {
           final approved = familyInfo['approved'] as bool?;
-          AppLogger.debug('Polling check - approved: $approved', tag: 'InitialSetupScreen');
+          AppLogger.debug(
+            'Polling check - approved: $approved',
+            tag: 'InitialSetupScreen',
+          );
 
           if (approved != null && mounted) {
             if (approved == true) {
@@ -305,7 +350,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     // 2-minute timeout - if no approval, delete from Firebase and reset
     _timeoutTimer = Timer(const Duration(minutes: 2), () async {
       if (_isWaitingForApproval && _generatedCode != null) {
-        AppLogger.warning('Timeout reached - no approval after 2 minutes', tag: 'InitialSetupScreen');
+        AppLogger.warning(
+          'Timeout reached - no approval after 2 minutes',
+          tag: 'InitialSetupScreen',
+        );
 
         // Cancel all listeners
         _approvalSubscription?.cancel();
@@ -315,9 +363,15 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         // Delete from Firebase
         try {
           await _firebaseService.deleteFamilyCode(_generatedCode!);
-          AppLogger.info('Family code $_generatedCode deleted due to timeout', tag: 'InitialSetupScreen');
+          AppLogger.info(
+            'Family code $_generatedCode deleted due to timeout',
+            tag: 'InitialSetupScreen',
+          );
         } catch (e) {
-          AppLogger.error('Failed to delete family code on timeout: $e', tag: 'InitialSetupScreen');
+          AppLogger.error(
+            'Failed to delete family code on timeout: $e',
+            tag: 'InitialSetupScreen',
+          );
         }
 
         // Reset UI
@@ -366,9 +420,15 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
     if (_generatedCode != null) {
       try {
         await _firebaseService.deleteFamilyCode(_generatedCode!);
-        AppLogger.info('Family code $_generatedCode deleted by user reset', tag: 'InitialSetupScreen');
+        AppLogger.info(
+          'Family code $_generatedCode deleted by user reset',
+          tag: 'InitialSetupScreen',
+        );
       } catch (e) {
-        AppLogger.error('Failed to delete family code: $e', tag: 'InitialSetupScreen');
+        AppLogger.error(
+          'Failed to delete family code: $e',
+          tag: 'InitialSetupScreen',
+        );
       }
     }
 
@@ -897,7 +957,9 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                       runSpacing: 8,
                                       children: [
                                         ...[3, 6, 12, 24].map((hours) {
-                                          final isSelected = _alertHours == hours && !_useCustomAlertHours;
+                                          final isSelected =
+                                              _alertHours == hours &&
+                                              !_useCustomAlertHours;
                                           return GestureDetector(
                                             onTap: () {
                                               setState(() {
@@ -907,10 +969,11 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                               });
                                             },
                                             child: Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 16,
-                                                vertical: 8,
-                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 8,
+                                                  ),
                                               decoration: BoxDecoration(
                                                 color: isSelected
                                                     ? const Color(0xFF10B981)
@@ -942,7 +1005,8 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                           onTap: () {
                                             setState(() {
                                               _useCustomAlertHours = true;
-                                              _alertHoursController.text = _alertHours.toString();
+                                              _alertHoursController.text =
+                                                  _alertHours.toString();
                                             });
                                           },
                                           child: Container(
@@ -981,10 +1045,14 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                     if (_useCustomAlertHours) ...[
                                       const SizedBox(height: 16),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: Colors.white,
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           border: Border.all(
                                             color: const Color(0xFF10B981),
                                             width: 2,
@@ -1010,11 +1078,16 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                               fontWeight: FontWeight.w500,
                                             ),
                                             border: InputBorder.none,
-                                            contentPadding: EdgeInsets.symmetric(vertical: 12),
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                                  vertical: 12,
+                                                ),
                                           ),
                                           onChanged: (value) {
                                             final hours = int.tryParse(value);
-                                            if (hours != null && hours >= 1 && hours <= 72) {
+                                            if (hours != null &&
+                                                hours >= 1 &&
+                                                hours <= 72) {
                                               setState(() {
                                                 _alertHours = hours;
                                               });
@@ -1051,7 +1124,8 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                   setState(() {
                                     _sleepTimeExclusionEnabled = value;
                                     if (value) {
-                                      _sleepTimeSettings = _sleepTimeSettings.copyWith(enabled: true);
+                                      _sleepTimeSettings = _sleepTimeSettings
+                                          .copyWith(enabled: true);
                                     }
                                   });
                                 },
@@ -1215,7 +1289,11 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.schedule_outlined, size: 20, color: AppTheme.primaryGreen),
+              Icon(
+                Icons.schedule_outlined,
+                size: 20,
+                color: AppTheme.primaryGreen,
+              ),
               const SizedBox(width: 8),
               const Text(
                 '수면 시간 설정',
@@ -1248,7 +1326,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                     GestureDetector(
                       onTap: () => _selectTime(true),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
@@ -1265,7 +1346,11 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                 color: AppTheme.textSecondary,
                               ),
                             ),
-                            const Icon(Icons.access_time, size: 20, color: AppTheme.textLight),
+                            const Icon(
+                              Icons.access_time,
+                              size: 20,
+                              color: AppTheme.textLight,
+                            ),
                           ],
                         ),
                       ),
@@ -1290,7 +1375,10 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                     GestureDetector(
                       onTap: () => _selectTime(false),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
@@ -1307,7 +1395,11 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                                 color: AppTheme.textSecondary,
                               ),
                             ),
-                            const Icon(Icons.access_time, size: 20, color: AppTheme.textLight),
+                            const Icon(
+                              Icons.access_time,
+                              size: 20,
+                              color: AppTheme.textLight,
+                            ),
                           ],
                         ),
                       ),
@@ -1336,7 +1428,7 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                 final day = entry.value;
                 final dayNames = ['월', '화', '수', '목', '금', '토', '일'];
                 final isSelected = _sleepTimeSettings.activeDays.contains(day);
-                
+
                 return Expanded(
                   child: GestureDetector(
                     onTap: () => _toggleActiveDay(day),
@@ -1344,10 +1436,14 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                       margin: EdgeInsets.only(right: entry.key < 6 ? 4 : 0),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: isSelected ? AppTheme.primaryGreen : Colors.white,
+                        color: isSelected
+                            ? AppTheme.primaryGreen
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: isSelected ? AppTheme.primaryGreen : const Color(0xFFD1D5DB),
+                          color: isSelected
+                              ? AppTheme.primaryGreen
+                              : const Color(0xFFD1D5DB),
                         ),
                       ),
                       child: Center(
@@ -1356,7 +1452,9 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: isSelected ? Colors.white : AppTheme.textLight,
+                            color: isSelected
+                                ? Colors.white
+                                : AppTheme.textLight,
                           ),
                         ),
                       ),
@@ -1404,19 +1502,19 @@ class _InitialSetupScreenState extends State<InitialSetupScreen> {
   }
 
   Future<void> _selectTime(bool isStartTime) async {
-    final initialTime = isStartTime 
-        ? _sleepTimeSettings.sleepStart 
+    final initialTime = isStartTime
+        ? _sleepTimeSettings.sleepStart
         : _sleepTimeSettings.sleepEnd;
-        
+
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: initialTime,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: AppTheme.primaryGreen,
-            ),
+            colorScheme: Theme.of(
+              context,
+            ).colorScheme.copyWith(primary: AppTheme.primaryGreen),
           ),
           child: child!,
         );
